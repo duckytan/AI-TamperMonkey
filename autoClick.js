@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Idle Pixel Auto
 // @namespace    http://tampermonkey.net/
-// @version      1.9
+// @version      2.0
 // @description  自动进行Idle Pixel游戏中的各种操作
 // @author       Duckyの復活
 // @match        https://idle-pixel.com/login/play/
@@ -11,6 +11,10 @@
 
 /*
 更新日志：
+v2.0 (2025-10-19)
+1. 修复全局定时器中调用不存在的refreshUrl方法问题，修正为调用正确的performRedirect方法
+2. 优化重定向机制，确保在WebSocket错误或定时重启时能正确执行重定向功能
+
 v1.9 (2024-11-20)
 1. 新增获取当前矿石数量的函数elementFinders.getOreCount
 2. 优化矿石熔炼资源检查机制，新增checkResourcesSufficient函数同时检查矿石和石油数量
@@ -110,7 +114,7 @@ Modals.open_furnace_dialogue()
     'use strict';
 
     // 统一版本号
-    const scriptVersion = '1.9';
+    const scriptVersion = '2.0';
     const featurePrefix = '【IdlePixelAuto】';
 
     // ================ 日志管理 ================
