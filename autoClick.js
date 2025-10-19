@@ -1706,6 +1706,56 @@ Modals.open_furnace_dialogue()
             }
         },
 
+        // 获取当前WebSocket连接状态列表（用于MCP服务检查）
+        getWebSocketStatuses: function() {
+            const statuses = [];
+            const seen = new Set();
+            const allPossibleSocketNames = [
+                'gameSocket', 'websocket', 'socket', 'ws',
+                'game_socket', 'connection', 'wsConnection', 'socketConnection',
+                'clientSocket', 'serverSocket', 'webSocket', 'gameConnection',
+                'idleSocket', 'pixelSocket', 'idlePixelSocket', 'gameClient',
+                'socketClient', 'wsClient', 'connectionClient', 'gameWS'
+            ];
+            const stateMap = { 0: 'CONNECTING', 1: 'OPEN', 2: 'CLOSING', 3: 'CLOSED' };
+
+            function addStatus(name, sock) {
+                try {
+                    if (!sock || seen.has(sock)) return;
+                    seen.add(sock);
+                    let code = typeof sock.readyState === 'number' ? sock.readyState : -1;
+                    let text = stateMap.hasOwnProperty(code) ? stateMap[code] : 'UNKNOWN';
+                    statuses.push({ name, stateCode: code, stateText: text });
+                } catch (e) {
+                    // 忽略单个状态采集错误
+                }
+            }
+
+            // window 上的直连
+            for (const name of allPossibleSocketNames) {
+                try {
+                    const sock = window[name];
+                    if (sock && typeof sock.send === 'function') {
+                        addStatus(`window.${name}`, sock);
+                    }
+                } catch (e) {}
+            }
+
+            // 常见游戏对象
+            const gameObjects = ['Game', 'IdleGame', 'PixelGame', 'MainGame'];
+            for (const objName of gameObjects) {
+                try {
+                    const obj = window[objName];
+                    if (!obj) continue;
+                    if (obj.socket && typeof obj.socket.send === 'function') addStatus(`${objName}.socket`, obj.socket);
+                    if (obj.connection && typeof obj.connection.send === 'function') addStatus(`${objName}.connection`, obj.connection);
+                    if (obj.ws && typeof obj.ws.send === 'function') addStatus(`${objName}.ws`, obj.ws);
+                } catch (e) {}
+            }
+
+            return statuses;
+        },
+
         // 执行渔船管理
         executeBoatManagement: function() {
             try {
@@ -3643,6 +3693,47 @@ Modals.open_furnace_dialogue()
         `;
 
         systemContent.appendChild(refreshUrlRow);
+
+        // MCP 服务检查行
+        const mcpRow = document.createElement('div');
+        mcpRow.className = 'feature-row';
+        mcpRow.innerHTML = `
+            <span class="feature-name" title="检查当前WebSocket连接与刷新网址可用性">MCP服务</span>
+            <button class="check-mcp-button">检查</button>
+            <span class="mcp-status">未检查</span>
+        `;
+        systemContent.appendChild(mcpRow);
+
+        // 绑定 MCP 检查事件
+        mcpRow.querySelector('.check-mcp-button').addEventListener('click', async function() {
+            const statusSpan = mcpRow.querySelector('.mcp-status');
+            statusSpan.textContent = '检查中...';
+
+            // WebSocket 状态
+            let wsSummary = '未发现连接';
+            try {
+                const wsStatuses = featureManager.getWebSocketStatuses ? featureManager.getWebSocketStatuses() : [];
+                if (wsStatuses.length > 0) {
+                    wsSummary = wsStatuses.map(s => `${s.name}:${s.stateText}`).join(', ');
+                }
+            } catch (e) {
+                logger.error('【MCP服务】获取WebSocket状态出错:', e);
+            }
+
+            // 刷新URL可用性
+            let urlSummary = '--/--';
+            try {
+                const urlToCheck = (config.features.refreshUrl && config.features.refreshUrl.url) || window.location.href;
+                const result = await featureManager.checkUrlAvailability(urlToCheck);
+                const percent = Math.round((result.success / result.total) * 100);
+                urlSummary = `${result.success}/${result.total} (${percent}%)`;
+            } catch (e) {
+                logger.error('【MCP服务】检测URL可用性出错:', e);
+            }
+
+            statusSpan.textContent = `WS: ${wsSummary} | URL: ${urlSummary}`;
+            logger.info(`【MCP服务】检查结果 => ${statusSpan.textContent}`);
+        });
 
         // 绑定事件
         refreshUrlRow.querySelector('.refresh-url-input').addEventListener('change', function(e) {
