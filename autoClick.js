@@ -231,7 +231,7 @@ Modals.open_furnace_dialogue()
             },
             errorRestart: {
                 enabled: false,
-                interval: 100, // 默认100次
+                interval: 3, // 默认3次更合理
                 name: '错误重启'
             },
             timedRestart: {
@@ -2010,35 +2010,52 @@ Modals.open_furnace_dialogue()
         },
 
         // 执行重定向
-        performRedirect: async function() {
+        performRedirect: async function(options = {}) {
+            const { skipCooldown = false, skipCheck = false } = options;
+
             // 确保属性初始化
             this.ensureRedirectProperties();
-
-            // 检查重定向冷却
-            if (this.isRedirectOnCooldown()) {
-                logger.warn('【重定向管理】冷却中，延迟重定向');
-                return false;
-            }
 
             const url = config.features.refreshUrl.url || window.location.href;
             logger.info(`【重定向管理】准备重定向到: ${url}`);
 
-            // 执行URL检测
-            const checkResult = await this.checkUrlAvailability(url);
-            const successRate = checkResult.success / checkResult.total;
+            // 如果与当前同源，直接跳过检测
+            let sameOrigin = false;
+            try {
+                const target = new URL(url, window.location.href);
+                sameOrigin = target.origin === window.location.origin;
+            } catch (e) {
+                // 忽略URL解析错误，按不同源处理
+            }
 
-            logger.info(`【重定向管理】URL检测结果: ${checkResult.success}/${checkResult.total} (${Math.round(successRate * 100)}%)`);
-
-            // 检查通过率
-            if (successRate >= 0.6) {
-                logger.info('【重定向管理】URL检测通过，开始重定向');
-                window.location.href = url;
-                return true;
-            } else {
-                logger.warn(`【重定向管理】URL检测失败，通过率${Math.round(successRate * 100)}% < 60%`);
-                this.setRedirectCooldown();
+            // 检查重定向冷却（除非跳过冷却）
+            if (!skipCooldown && this.isRedirectOnCooldown()) {
+                logger.warn('【重定向管理】冷却中，延迟重定向');
                 return false;
             }
+
+            // 检查URL可用性（除非跳过检测或同源）
+            if (!skipCheck && !sameOrigin) {
+                const checkResult = await this.checkUrlAvailability(url);
+                const successRate = checkResult.success / checkResult.total;
+
+                logger.info(`【重定向管理】URL检测结果: ${checkResult.success}/${checkResult.total} (${Math.round(successRate * 100)}%)`);
+
+                if (successRate < 0.6) {
+                    logger.warn(`【重定向管理】URL检测失败，通过率${Math.round(successRate * 100)}% < 60%`);
+                    this.setRedirectCooldown();
+                    return false;
+                }
+            }
+
+            logger.info('【重定向管理】开始重定向');
+            try {
+                window.location.href = url;
+            } catch (e) {
+                logger.error('【重定向管理】重定向失败:', e);
+                return false;
+            }
+            return true;
         },
 
         // 处理WebSocket错误
@@ -2093,7 +2110,7 @@ Modals.open_furnace_dialogue()
                 const that = this;
                 this.timedRestartTimer = setTimeout(() => {
                     logger.info('【定时重启】时间到达，触发重定向');
-                    that.performRedirect();
+                    that.performRedirect({ skipCooldown: true, skipCheck: true });
                 }, interval);
 
                 // 添加到清理资源
@@ -2269,7 +2286,7 @@ Modals.open_furnace_dialogue()
         // 检查window对象上的WebSocket实例
         for (const socketName of allPossibleSocketNames) {
             const socket = window[socketName];
-            if (socket && typeof socket === 'object' && socket.constructor.name === 'WebSocket') {
+            if (socket && typeof socket === 'object' && socket.constructor && (socket.constructor.name === 'WebSocket' || socket instanceof WebSocket)) {
                 try {
                     // 确保只添加一次监听器
                     if (!socket._errorRestartListenerAdded) {
@@ -2291,6 +2308,44 @@ Modals.open_furnace_dialogue()
                     logger.warn(`【错误重启】为 ${socketName} 添加监听器时出错:`, e);
                 }
             }
+        }
+
+        // 兜底方案：挂钩全局WebSocket构造函数，确保新建的连接也能被监听
+        try {
+            if (!window.__ipa_ws_hooked && typeof window.WebSocket === 'function') {
+                window.__ipa_ws_hooked = true;
+                const OriginalWebSocket = window.WebSocket;
+
+                const HookedWebSocket = function(...args) {
+                    const ws = new OriginalWebSocket(...args);
+                    try {
+                        if (!ws._errorRestartListenerAdded) {
+                            ws._errorRestartListenerAdded = true;
+                            ws.addEventListener('error', function() {
+                                if (config.features.errorRestart && config.features.errorRestart.enabled) {
+                                    featureManager.handleWebSocketError();
+                                }
+                            });
+                            ws.addEventListener('close', function(event) {
+                                if (config.features.errorRestart && config.features.errorRestart.enabled && !event.wasClean) {
+                                    featureManager.handleWebSocketError();
+                                }
+                            });
+                        }
+                    } catch (e) {
+                        // 忽略
+                    }
+                    return ws;
+                };
+
+                // 保留原型链和静态属性
+                HookedWebSocket.prototype = OriginalWebSocket.prototype;
+                Object.setPrototypeOf(HookedWebSocket, OriginalWebSocket);
+                window.WebSocket = HookedWebSocket;
+                logger.info('【错误重启】已挂钩全局WebSocket构造函数');
+            }
+        } catch (e) {
+            logger.warn('【错误重启】挂钩全局WebSocket失败:', e);
         }
     }
 
@@ -3507,7 +3562,7 @@ Modals.open_furnace_dialogue()
             <span class="feature-name" title="当检测到WebSocket错误达到指定次数时，自动重定向到刷新网址" data-bs-toggle="tooltip" data-bs-placement="right">错误重启</span>
             <input type="number" class="feature-interval" value="${errorRestartCount}" min="1" step="1">
             <span class="interval-label">次</span>
-            <span class="error-count" style="margin-left: auto; color: #ff6b6b; font-weight: bold;">${typeof wsErrorCount !== 'undefined' ? wsErrorCount : 0}</span>
+            <span class="error-count" style="margin-left: auto; color: #ff6b6b; font-weight: bold;">${(featureManager && typeof featureManager.wsErrorCount === 'number') ? featureManager.wsErrorCount : 0}</span>
         `;
 
         systemContent.appendChild(errorRestartRow);
@@ -3515,7 +3570,7 @@ Modals.open_furnace_dialogue()
         // 绑定事件
         errorRestartRow.querySelector('input[data-feature="errorRestart"]').addEventListener('change', function(e) {
             if (!config.features.errorRestart) {
-                config.features.errorRestart = { enabled: false, interval: 100, name: '错误重启' };
+                config.features.errorRestart = { enabled: false, interval: 3, name: '错误重启' };
             }
             toggleFeature('errorRestart', e.target.checked);
             if (e.target.checked) {
@@ -3531,7 +3586,7 @@ Modals.open_furnace_dialogue()
 
         errorRestartRow.querySelector('.feature-interval').addEventListener('change', function(e) {
             if (!config.features.errorRestart) {
-                config.features.errorRestart = { enabled: false, interval: 100, name: '错误重启' };
+                config.features.errorRestart = { enabled: false, interval: 3, name: '错误重启' };
             }
             const value = parseInt(e.target.value);
             if (!isNaN(value) && value > 0) {
@@ -3690,7 +3745,8 @@ Modals.open_furnace_dialogue()
         function updateErrorCountDisplay() {
             const errorCountElement = errorRestartRow.querySelector('.error-count');
             if (errorCountElement) {
-                errorCountElement.textContent = typeof wsErrorCount !== 'undefined' ? wsErrorCount : 0;
+                const count = (featureManager && typeof featureManager.wsErrorCount === 'number') ? featureManager.wsErrorCount : 0;
+                errorCountElement.textContent = String(count);
             }
         }
 
@@ -3730,16 +3786,16 @@ Modals.open_furnace_dialogue()
             featureManager.toggleTimedRestart = function(enabled) {
                 console.log('【定时重启】切换状态:', enabled);
 
-                // 从配置中获取间隔时间，不再从参数中获取
-                const interval = config.features.timedRestart && config.features.timedRestart.interval || 10;
+                // 从配置中获取间隔时间（毫秒）
+                const intervalMs = (config.features.timedRestart && config.features.timedRestart.interval) || 36000000; // 默认10小时
 
                 // 使用全局window对象存储变量，确保跨作用域可见
                 window.restartStartTime = enabled ? Date.now() : null;
-                window.restartInterval = enabled ? interval * 60 * 1000 : null;
+                window.restartInterval = enabled ? intervalMs : null;
 
                 // 重要：不再创建自己的定时器，依赖全局定时器
                 if (enabled) {
-                    console.log('【定时重启】已启用，间隔:', interval, '分钟');
+                    console.log('【定时重启】已启用，间隔(ms):', intervalMs);
                     console.log('【定时重启】使用全局定时器，不创建新定时器');
 
                     // 立即更新一次倒计时显示
@@ -3799,7 +3855,7 @@ Modals.open_furnace_dialogue()
                     console.log('【全局定时器】达到重启时间，执行刷新');
                     // 执行刷新操作
                     if (featureManager.performRedirect) {
-                        featureManager.performRedirect();
+                        featureManager.performRedirect({ skipCooldown: true, skipCheck: true });
                     } else {
                         // 如果没有performRedirect方法，使用默认的location.reload
                         location.reload();
