@@ -1984,11 +1984,6 @@ Fishing.clicks_boat('canoe_boat')
             if (timerSec) timerSec.value = st.timerSeconds || 36000;
             const timerRemain = document.querySelector('#timer-remaining-display');
             if (timerRemain) timerRemain.textContent = this._formatHHMMSS(st.timerRemaining || st.timerSeconds || 0);
-
-            const startBtn = document.querySelector('#timer-start-btn');
-            const pauseBtn = document.querySelector('#timer-pause-btn');
-            if (startBtn) startBtn.disabled = !st.timerEnabled || !!st.timerRunning;
-            if (pauseBtn) pauseBtn.disabled = !st.timerEnabled || !st.timerRunning;
         },
 
         // 运行多方式URL健康检测（≥8种）
@@ -2194,7 +2189,9 @@ Fishing.clicks_boat('canoe_boat')
                 st.timerRunning = true;
                 this._startRestartTimerLoop();
             } else {
+                // 取消打钩：重置并停止
                 st.timerRunning = false;
+                st.timerRemaining = st.timerSeconds || 36000;
             }
             this._saveRestartState();
             this._updateRestartUI();
@@ -3679,9 +3676,6 @@ Fishing.clicks_boat('canoe_boat')
             <span class="feature-name" title="根据设置的时长倒计时，到时触发跳转流程">定时重启</span>
             <input id="timer-seconds-input" type="number" class="feature-interval" value="${restartState.timerSeconds || 36000}" min="60" step="60">
             <span class="interval-label">秒</span>
-            <button id="timer-start-btn" class="check-url-button" style="background:#0ea5e9;">开始</button>
-            <button id="timer-pause-btn" class="check-url-button" style="background:#f59e0b;">暂停</button>
-            <button id="timer-reset-btn" class="check-url-button" style="background:#64748b;">重置</button>
             <span id="timer-remaining-display" class="countdown-display" style="margin-left:auto;">${featureManager._formatHHMMSS(restartState.timerRemaining || restartState.timerSeconds || 0)}</span>
         `;
         systemContent.appendChild(timerCtrlRow);
@@ -3755,29 +3749,7 @@ Fishing.clicks_boat('canoe_boat')
             }
             featureManager._updateRestartUI();
         });
-        timerCtrlRow.querySelector('#timer-start-btn').addEventListener('click', () => {
-            featureManager._loadRestartState();
-            featureManager.restart.timerEnabled = true;
-            featureManager.restart.timerRunning = true;
-            if (!featureManager.restart.timerRemaining || featureManager.restart.timerRemaining <= 0) {
-                featureManager.restart.timerRemaining = featureManager.restart.timerSeconds || 36000;
-            }
-            featureManager._saveRestartState();
-            featureManager._startRestartTimerLoop();
-            featureManager._updateRestartUI();
-        });
-        timerCtrlRow.querySelector('#timer-pause-btn').addEventListener('click', () => {
-            featureManager._loadRestartState();
-            featureManager.restart.timerRunning = false;
-            featureManager._saveRestartState();
-            featureManager._updateRestartUI();
-        });
-        timerCtrlRow.querySelector('#timer-reset-btn').addEventListener('click', () => {
-            featureManager._loadRestartState();
-            featureManager.restart.timerRemaining = featureManager.restart.timerSeconds || 36000;
-            featureManager._saveRestartState();
-            featureManager._updateRestartUI();
-        });
+        
 
         // 初始化UI显示与定时器
         featureManager._saveRestartState();
