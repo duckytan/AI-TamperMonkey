@@ -530,80 +530,61 @@ Fishing.clicks_boat('canoe_boat')
         // 检查WebSocket连接状态
         checkWebSocketConnection: function() {
             try {
-                // 使用与sendWebSocketMessage相同的WebSocket检测逻辑
                 logger.debug('【工具函数】检查WebSocket连接状态');
 
-                // 定义更全面的可能WebSocket变量名列表
+                const roots = [];
+                try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) roots.push(unsafeWindow); } catch (e) {}
+                roots.push(window);
+
                 const allPossibleSocketNames = [
-                    // 标准名称变体
                     'gameSocket', 'websocket', 'socket', 'ws',
-                    // 常见命名约定
                     'game_socket', 'connection', 'wsConnection', 'socketConnection',
                     'clientSocket', 'serverSocket', 'webSocket', 'gameConnection',
-                    // 游戏可能使用的特定名称
                     'idleSocket', 'pixelSocket', 'idlePixelSocket', 'gameClient',
                     'socketClient', 'wsClient', 'connectionClient', 'gameWS'
                 ];
 
-                // 检查window对象上的WebSocket实例
-                for (const socketName of allPossibleSocketNames) {
-                    try {
-                        const socket = window[socketName];
-                        if (this.isValidWebSocket(socket)) {
-                            logger.debug(`【工具函数】检测到可用的WebSocket连接: window.${socketName}`);
-                            return true;
-                        }
-                    } catch (e) {
-                        logger.debug(`【工具函数】检查window.${socketName}时出错，跳过:`, e);
+                // 在 roots 上检查常见变量名
+                for (const root of roots) {
+                    for (const socketName of allPossibleSocketNames) {
+                        try {
+                            const socket = root[socketName];
+                            if (this.isValidWebSocket(socket)) {
+                                logger.debug(`【工具函数】检测到可用的WebSocket连接: ${root === window ? 'window' : 'unsafeWindow'}.${socketName}`);
+                                return true;
+                            }
+                        } catch (e) { /* ignore */ }
                     }
                 }
 
-                // 检查全局变量
-                for (const socketName of allPossibleSocketNames) {
-                    try {
-                        // 避免使用eval，使用全局作用域检查
-                        const socket = (function(name) {
-                            return window[name];
-                        })(socketName);
-                        if (this.isValidWebSocket(socket)) {
-                            logger.debug(`【工具函数】检测到可用的WebSocket连接: 全局${socketName}`);
-                            return true;
-                        }
-                    } catch (e) {
-                        logger.debug(`【工具函数】检查全局${socketName}时出错，跳过:`, e);
-                    }
-                }
-
-                // 尝试查找可能存在的连接对象
-                try {
-                    // 检查常见的游戏对象中是否包含socket
-                    const gameObjects = ['Game', 'IdleGame', 'PixelGame', 'MainGame'];
+                // 检查常见游戏对象
+                const gameObjects = ['Game', 'IdleGame', 'PixelGame', 'MainGame', 'IdlePixel'];
+                for (const root of roots) {
                     for (const gameObjName of gameObjects) {
-                        const gameObj = window[gameObjName];
-                        if (gameObj) {
-                            // 检查游戏对象的socket属性
-                            if (this.isValidWebSocket(gameObj.socket)) {
-                                logger.debug(`【工具函数】检测到可用的WebSocket连接: ${gameObjName}.socket`);
-                                return true;
-                            }
-                            // 检查游戏对象的connection属性
-                            if (this.isValidWebSocket(gameObj.connection)) {
-                                logger.debug(`【工具函数】检测到可用的WebSocket连接: ${gameObjName}.connection`);
-                                return true;
-                            }
-                            // 检查游戏对象的ws属性
-                            if (this.isValidWebSocket(gameObj.ws)) {
-                                logger.debug(`【工具函数】检测到可用的WebSocket连接: ${gameObjName}.ws`);
-                                return true;
-                            }
-                        }
+                        try {
+                            const gameObj = root[gameObjName];
+                            if (!gameObj) continue;
+                            if (this.isValidWebSocket(gameObj.socket)) return true;
+                            if (this.isValidWebSocket(gameObj.connection)) return true;
+                            if (this.isValidWebSocket(gameObj.ws)) return true;
+                        } catch (e) { /* ignore */ }
                     }
-                } catch (e) {
-                    logger.debug(`【工具函数】检查游戏对象属性时出错:`, e);
                 }
 
-                // 由于WebSocket可能以其他方式存在，默认返回true允许功能继续尝试
-                // 实际的发送失败会在sendWebSocketMessage方法中处理
+                // 动态遍历可能键（名含 socket/ws）
+                for (const root of roots) {
+                    try {
+                        const keys = Object.keys(root).filter(k => /(socket|ws)/i.test(k));
+                        for (const k of keys) {
+                            try {
+                                const v = root[k];
+                                if (this.isValidWebSocket(v)) return true;
+                            } catch (e) { /* ignore */ }
+                        }
+                    } catch (e) { /* ignore */ }
+                }
+
+                // 默认允许继续（发送函数会处理失败并计数）
                 logger.debug('【工具函数】未直接检测到WebSocket连接，但将继续尝试');
                 return true;
             } catch (e) {
@@ -1729,94 +1710,110 @@ Fishing.clicks_boat('canoe_boat')
             try {
                 logger.debug('【WebSocket】准备发送消息:', message);
 
-                // 定义更全面的可能WebSocket变量名列表
+                // 取到真实页面上下文（Tampermonkey 沙箱下优先使用 unsafeWindow）
+                const roots = [];
+                try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) roots.push(unsafeWindow); } catch (e) {}
+                roots.push(window);
+
+                // 内部发送助手：支持OPEN/CONNECTING状态，CONNECTING时等待open后再发
+                const trySend = (sock, fromLabel) => {
+                    if (!sock || typeof sock.send !== 'function') return false;
+                    try {
+                        // 缓存引用，后续快速复用
+                        this._lastSocketRef = sock;
+                        const state = typeof sock.readyState === 'number' ? sock.readyState : -1;
+                        if (state === 1) { // OPEN
+                            logger.info(`【WebSocket】通过${fromLabel}发送消息 (OPEN)`);
+                            sock.send(message);
+                            return true;
+                        }
+                        if (state === 0) { // CONNECTING
+                            logger.info(`【WebSocket】连接尚未OPEN，等待open后发送 -> ${fromLabel}`);
+                            const onOpen = () => {
+                                try {
+                                    sock.send(message);
+                                    logger.info('【WebSocket】open后已发送消息');
+                                } catch (err) {
+                                    logger.error('【WebSocket】open后发送失败:', err);
+                                    if (typeof this.handleWebSocketError === 'function') this.handleWebSocketError();
+                                }
+                                try { sock.removeEventListener('open', onOpen); } catch (e) {}
+                            };
+                            try { sock.addEventListener('open', onOpen); } catch (e) {}
+                            // 5 秒后兜底移除监听，避免泄漏
+                            setTimeout(() => { try { sock.removeEventListener('open', onOpen); } catch (e) {} }, 5000);
+                            return true; // 视为已安排发送
+                        }
+                        logger.warn(`【WebSocket】socket非OPEN/CONNECTING状态: ${state}`);
+                        return false;
+                    } catch (e) {
+                        logger.error('【WebSocket】发送失败:', e);
+                        if (typeof this.handleWebSocketError === 'function') this.handleWebSocketError();
+                        return false;
+                    }
+                };
+
+                // 候选变量名
                 const allPossibleSocketNames = [
-                    // 标准名称变体
                     'gameSocket', 'websocket', 'socket', 'ws',
-                    // 常见命名约定
                     'game_socket', 'connection', 'wsConnection', 'socketConnection',
                     'clientSocket', 'serverSocket', 'webSocket', 'gameConnection',
-                    // 游戏可能使用的特定名称
                     'idleSocket', 'pixelSocket', 'idlePixelSocket', 'gameClient',
                     'socketClient', 'wsClient', 'connectionClient', 'gameWS'
                 ];
 
-                // 检查window对象上的WebSocket实例
-                for (const socketName of allPossibleSocketNames) {
-                    try {
-                        const socket = window[socketName];
-                        if (socket && this.isValidWebSocket(socket)) {
-                            logger.info(`【WebSocket】通过window.${socketName}对象发送消息`);
-                            socket.send(message);
-                            return true;
-                        }
-                    } catch (e) {
-                        logger.debug(`【WebSocket】检查window.${socketName}时出错，跳过:`, e);
+                // 1) 先用缓存
+                if (this._lastSocketRef && this.isValidWebSocket(this._lastSocketRef)) {
+                    const ok = trySend(this._lastSocketRef, '缓存socket');
+                    if (ok) return true;
+                }
+
+                // 2) 在 roots (unsafeWindow/window) 上查找常见变量名
+                for (const root of roots) {
+                    for (const socketName of allPossibleSocketNames) {
+                        try {
+                            const sock = root[socketName];
+                            if (sock && this.isValidWebSocket(sock)) {
+                                const label = `${root === window ? 'window' : 'unsafeWindow'}.${socketName}`;
+                                if (trySend(sock, label)) return true;
+                            }
+                        } catch (e) { /* ignore */ }
                     }
                 }
 
-                // 检查全局变量
-                for (const socketName of allPossibleSocketNames) {
-                    try {
-                        // 避免使用eval，使用全局作用域检查
-                        const socket = (function(name) {
-                            return window[name];
-                        })(socketName);
-                        if (socket && this.isValidWebSocket(socket)) {
-                            logger.info(`【WebSocket】通过全局${socketName}对象发送消息`);
-                            socket.send(message);
-                            return true;
-                        }
-                    } catch (e) {
-                        logger.debug(`【WebSocket】检查全局${socketName}时出错，跳过:`, e);
-                    }
-                }
-
-                // 尝试查找可能存在的连接对象
-                try {
-                    // 检查常见的游戏对象中是否包含socket
-                    const gameObjects = ['Game', 'IdleGame', 'PixelGame', 'MainGame'];
+                // 3) 检查常见游戏对象上的属性（socket/connection/ws）
+                const gameObjects = ['Game', 'IdleGame', 'PixelGame', 'MainGame', 'IdlePixel'];
+                for (const root of roots) {
                     for (const gameObjName of gameObjects) {
-                        const gameObj = window[gameObjName];
-                        if (gameObj) {
-                            // 检查游戏对象的socket属性
+                        try {
+                            const gameObj = root[gameObjName];
+                            if (!gameObj) continue;
                             if (this.isValidWebSocket(gameObj.socket)) {
-                                logger.info(`【WebSocket】通过${gameObjName}.socket对象发送消息`);
-                                gameObj.socket.send(message);
-                                return true;
+                                if (trySend(gameObj.socket, `${gameObjName}.socket`)) return true;
                             }
-                            // 检查游戏对象的connection属性
                             if (this.isValidWebSocket(gameObj.connection)) {
-                                logger.info(`【WebSocket】通过${gameObjName}.connection对象发送消息`);
-                                gameObj.connection.send(message);
-                                return true;
+                                if (trySend(gameObj.connection, `${gameObjName}.connection`)) return true;
                             }
-                            // 检查游戏对象的ws属性
                             if (this.isValidWebSocket(gameObj.ws)) {
-                                logger.info(`【WebSocket】通过${gameObjName}.ws对象发送消息`);
-                                gameObj.ws.send(message);
-                                return true;
+                                if (trySend(gameObj.ws, `${gameObjName}.ws`)) return true;
                             }
-                        }
+                        } catch (e) { /* ignore */ }
                     }
-                } catch (e) {
-                    logger.debug(`【WebSocket】检查游戏对象属性时出错:`, e);
                 }
 
-                // 尝试直接使用WebSocket API发送消息（作为备选方案）
-                try {
-                    logger.info('【WebSocket】尝试直接使用WebSocket API发送消息');
-                    // 检查当前页面的主机名，构建WebSocket URL
-                    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                    const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
-
-                    // 记录尝试使用的WebSocket URL
-                    logger.debug(`【WebSocket】尝试连接到: ${wsUrl}`);
-
-                    // 创建临时WebSocket连接（仅记录，不实际连接以避免干扰）
-                    logger.warn('【WebSocket】无法找到现有的WebSocket连接，需要更多调试信息');
-                } catch (e) {
-                    logger.error('【WebSocket】尝试构建WebSocket URL时出错:', e);
+                // 4) 动态遍历可能的全局字段（仅遍历名字里含 socket/ws 的键，减少开销）
+                for (const root of roots) {
+                    try {
+                        const keys = Object.keys(root).filter(k => /(socket|ws)/i.test(k));
+                        for (const k of keys) {
+                            try {
+                                const v = root[k];
+                                if (this.isValidWebSocket(v)) {
+                                    if (trySend(v, `${root === window ? 'window' : 'unsafeWindow'}['${k}']`)) return true;
+                                }
+                            } catch (e) { /* ignore */ }
+                        }
+                    } catch (e) { /* ignore */ }
                 }
 
                 logger.warn('【WebSocket】没有找到可用的WebSocket连接');
@@ -1989,6 +1986,8 @@ Fishing.clicks_boat('canoe_boat')
                         this.executeCombat();
                     } else if (featureName === 'trapHarvesting') {
                         this.executeTrapHarvesting();
+                    } else if (featureName === 'animalCollection') {
+                        this.executeAnimalCollection();
                     }
                 } catch (e) {
                     logger.error(`${featurePrefix}定时执行出错:`, e);
