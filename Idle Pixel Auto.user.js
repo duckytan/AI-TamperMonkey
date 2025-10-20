@@ -2115,26 +2115,66 @@ Fishing.clicks_boat('canoe_boat')
             logger.info(`【健康检测】开始检测: ${url}`);
             const results = [];
             const add = (ok, label) => { results.push({ ok, label }); };
-            const withTimeout = (p, ms, label) => new Promise(resolve => {
-                let done = false;
-                const to = setTimeout(() => { if (!done) { done = true; add(false, label + ' 超时'); resolve(false); } }, ms);
-                p.then(() => { if (!done) { done = true; clearTimeout(to); add(true, label); resolve(true); } })
-                 .catch(() => { if (!done) { done = true; clearTimeout(to); add(false, label); resolve(false); } });
-            });
+
+            // 明细记录
+            const details = [];
+            const createRec = (label, operation) => {
+                const rec = {
+                    index: details.length + 1,
+                    label,
+                    operation,
+                    start: Date.now(),
+                    end: 0,
+                    durMs: 0,
+                    ok: null,
+                    status: null,
+                    timeout: false,
+                    error: null
+                };
+                details.push(rec);
+                logger.info(`【健康检测】[${rec.index}] 方法: ${rec.label} | 操作: ${rec.operation}`);
+                return rec;
+            };
 
             const cacheBust = `__t=${Date.now()}_${Math.random().toString(36).slice(2)}`;
             const urlWithQ = url.includes('?') ? `${url}&${cacheBust}` : `${url}?${cacheBust}`;
 
             const tasks = [];
+
             // 1) GM_xmlhttpRequest GET 2xx/3xx 成功
             try {
                 if (typeof GM_xmlhttpRequest === 'function') {
+                    const rec = createRec('GM GET', 'GM_xmlhttpRequest 发起 GET 请求（超时 8 秒，跟随重定向）');
                     tasks.push(new Promise(resolve => {
                         GM_xmlhttpRequest({
                             method: 'GET', url: urlWithQ, timeout: 8000, redirect: 'follow',
-                            onload: (res) => { add(res.status >= 200 && res.status < 400, 'GM GET'); resolve(); },
-                            onerror: () => { add(false, 'GM GET'); resolve(); },
-                            ontimeout: () => { add(false, 'GM GET 超时'); resolve(); }
+                            onload: (res) => {
+                                rec.end = Date.now();
+                                rec.durMs = rec.end - rec.start;
+                                rec.status = res.status;
+                                rec.ok = res.status >= 200 && res.status < 400;
+                                add(rec.ok, rec.label);
+                                logger.info(`【健康检测】[${rec.index}] 结果: ${rec.ok ? '成功' : '失败'} | 状态: ${res.status} | 耗时: ${rec.durMs}ms`);
+                                resolve();
+                            },
+                            onerror: () => {
+                                rec.end = Date.now();
+                                rec.durMs = rec.end - rec.start;
+                                rec.ok = false;
+                                rec.error = '网络错误';
+                                add(false, rec.label);
+                                logger.info(`【健康检测】[${rec.index}] 结果: 失败 | 错误: 网络错误 | 耗时: ${rec.durMs}ms`);
+                                resolve();
+                            },
+                            ontimeout: () => {
+                                rec.end = Date.now();
+                                rec.durMs = rec.end - rec.start;
+                                rec.ok = false;
+                                rec.timeout = true;
+                                add(false, rec.label + ' 超时');
+                                logger.info(`【健康检测】[${rec.index}] 结果: 超时 | 耗时: ${rec.durMs}ms`);
+                                resolve();
+                            }
                         });
                     }));
                 }
@@ -2143,12 +2183,37 @@ Fishing.clicks_boat('canoe_boat')
             // 2) GM_xmlhttpRequest HEAD
             try {
                 if (typeof GM_xmlhttpRequest === 'function') {
+                    const rec = createRec('GM HEAD', 'GM_xmlhttpRequest 发起 HEAD 请求（超时 8 秒）');
                     tasks.push(new Promise(resolve => {
                         GM_xmlhttpRequest({
                             method: 'HEAD', url: urlWithQ, timeout: 8000,
-                            onload: (res) => { add(res.status >= 200 && res.status < 400, 'GM HEAD'); resolve(); },
-                            onerror: () => { add(false, 'GM HEAD'); resolve(); },
-                            ontimeout: () => { add(false, 'GM HEAD 超时'); resolve(); }
+                            onload: (res) => {
+                                rec.end = Date.now();
+                                rec.durMs = rec.end - rec.start;
+                                rec.status = res.status;
+                                rec.ok = res.status >= 200 && res.status < 400;
+                                add(rec.ok, rec.label);
+                                logger.info(`【健康检测】[${rec.index}] 结果: ${rec.ok ? '成功' : '失败'} | 状态: ${res.status} | 耗时: ${rec.durMs}ms`);
+                                resolve();
+                            },
+                            onerror: () => {
+                                rec.end = Date.now();
+                                rec.durMs = rec.end - rec.start;
+                                rec.ok = false;
+                                rec.error = '网络错误';
+                                add(false, rec.label);
+                                logger.info(`【健康检测】[${rec.index}] 结果: 失败 | 错误: 网络错误 | 耗时: ${rec.durMs}ms`);
+                                resolve();
+                            },
+                            ontimeout: () => {
+                                rec.end = Date.now();
+                                rec.durMs = rec.end - rec.start;
+                                rec.ok = false;
+                                rec.timeout = true;
+                                add(false, rec.label + ' 超时');
+                                logger.info(`【健康检测】[${rec.index}] 结果: 超时 | 耗时: ${rec.durMs}ms`);
+                                resolve();
+                            }
                         });
                     }));
                 }
@@ -2157,55 +2222,234 @@ Fishing.clicks_boat('canoe_boat')
             // 3) GM_xmlhttpRequest GET（3-5s超时快速失败）
             try {
                 if (typeof GM_xmlhttpRequest === 'function') {
+                    const rec = createRec('GM GET(快)', 'GM_xmlhttpRequest 发起 GET 快速检测（超时 3.5 秒）');
                     tasks.push(new Promise(resolve => {
                         GM_xmlhttpRequest({
                             method: 'GET', url: urlWithQ, timeout: 3500,
-                            onload: (res) => { add(res.status >= 200 && res.status < 400, 'GM GET(快)'); resolve(); },
-                            onerror: () => { add(false, 'GM GET(快)'); resolve(); },
-                            ontimeout: () => { add(false, 'GM GET(快) 超时'); resolve(); }
+                            onload: (res) => {
+                                rec.end = Date.now();
+                                rec.durMs = rec.end - rec.start;
+                                rec.status = res.status;
+                                rec.ok = res.status >= 200 && res.status < 400;
+                                add(rec.ok, rec.label);
+                                logger.info(`【健康检测】[${rec.index}] 结果: ${rec.ok ? '成功' : '失败'} | 状态: ${res.status} | 耗时: ${rec.durMs}ms`);
+                                resolve();
+                            },
+                            onerror: () => {
+                                rec.end = Date.now();
+                                rec.durMs = rec.end - rec.start;
+                                rec.ok = false;
+                                rec.error = '网络错误';
+                                add(false, rec.label);
+                                logger.info(`【健康检测】[${rec.index}] 结果: 失败 | 错误: 网络错误 | 耗时: ${rec.durMs}ms`);
+                                resolve();
+                            },
+                            ontimeout: () => {
+                                rec.end = Date.now();
+                                rec.durMs = rec.end - rec.start;
+                                rec.ok = false;
+                                rec.timeout = true;
+                                add(false, rec.label + ' 超时');
+                                logger.info(`【健康检测】[${rec.index}] 结果: 超时 | 耗时: ${rec.durMs}ms`);
+                                resolve();
+                            }
                         });
                     }));
                 }
             } catch (e) { /* ignore */ }
 
-            // 4) fetch GET no-store
-            tasks.push(withTimeout(fetch(urlWithQ, { method: 'GET', cache: 'no-store' }), 5000, 'fetch GET'));
-            // 5) fetch HEAD
-            tasks.push(withTimeout(fetch(urlWithQ, { method: 'HEAD', cache: 'no-store' }), 5000, 'fetch HEAD'));
-            // 6) Image
-            tasks.push(new Promise(resolve => {
-                const img = new Image();
-                img.onload = () => { add(true, 'Image'); resolve(true); };
-                img.onerror = () => { add(false, 'Image'); resolve(false); };
-                img.src = urlWithQ;
-                setTimeout(() => resolve(false), 5000);
-            }));
-            // 7) 隐藏iframe
-            tasks.push(new Promise(resolve => {
-                const iframe = document.createElement('iframe');
-                iframe.style.display = 'none';
-                iframe.onload = () => { add(true, 'Iframe'); try { document.body.removeChild(iframe); } catch(e){} resolve(true); };
-                iframe.onerror = () => { add(false, 'Iframe'); try { document.body.removeChild(iframe); } catch(e){} resolve(false); };
-                iframe.src = urlWithQ;
-                document.body.appendChild(iframe);
-                setTimeout(() => { try { document.body.removeChild(iframe); } catch(e){} add(false, 'Iframe 超时'); resolve(false); }, 5000);
-            }));
-            // 8) Script 动态加载
-            tasks.push(new Promise(resolve => {
-                const s = document.createElement('script');
-                s.async = true;
-                s.onload = () => { add(true, 'Script'); try { s.remove(); } catch(e){} resolve(true); };
-                s.onerror = () => { add(false, 'Script'); try { s.remove(); } catch(e){} resolve(false); };
-                s.src = urlWithQ;
-                document.head.appendChild(s);
-                setTimeout(() => { try { s.remove(); } catch(e){} add(false, 'Script 超时'); resolve(false); }, 5000);
-            }));
+            // 4) fetch GET no-store（5 秒超时）
+            (function(){
+                const rec = createRec('fetch GET', 'fetch 发起 GET 请求（cache=no-store，超时 5 秒）');
+                tasks.push((async () => {
+                    try {
+                        const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+                        const timer = setTimeout(() => { try { controller && controller.abort(); } catch(e){} }, 5000);
+                        const res = await fetch(urlWithQ, { method: 'GET', cache: 'no-store', signal: controller ? controller.signal : undefined });
+                        clearTimeout(timer);
+                        rec.end = Date.now();
+                        rec.durMs = rec.end - rec.start;
+                        rec.status = res.status;
+                        rec.ok = res.status >= 200 && res.status < 400;
+                        add(rec.ok, rec.label);
+                        logger.info(`【健康检测】[${rec.index}] 结果: ${rec.ok ? '成功' : '失败'} | 状态: ${res.status} | 耗时: ${rec.durMs}ms`);
+                    } catch (e) {
+                        rec.end = Date.now();
+                        rec.durMs = rec.end - rec.start;
+                        if (e && (e.name === 'AbortError' || e.message === 'The operation was aborted.')) {
+                            rec.ok = false; rec.timeout = true;
+                            add(false, rec.label + ' 超时');
+                            logger.info(`【健康检测】[${rec.index}] 结果: 超时 | 耗时: ${rec.durMs}ms`);
+                        } else {
+                            rec.ok = false; rec.error = (e && e.message) || String(e);
+                            add(false, rec.label);
+                            logger.info(`【健康检测】[${rec.index}] 结果: 失败 | 错误: ${rec.error} | 耗时: ${rec.durMs}ms`);
+                        }
+                    }
+                })());
+            })();
+
+            // 5) fetch HEAD（5 秒超时）
+            (function(){
+                const rec = createRec('fetch HEAD', 'fetch 发起 HEAD 请求（cache=no-store，超时 5 秒）');
+                tasks.push((async () => {
+                    try {
+                        const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+                        const timer = setTimeout(() => { try { controller && controller.abort(); } catch(e){} }, 5000);
+                        const res = await fetch(urlWithQ, { method: 'HEAD', cache: 'no-store', signal: controller ? controller.signal : undefined });
+                        clearTimeout(timer);
+                        rec.end = Date.now();
+                        rec.durMs = rec.end - rec.start;
+                        rec.status = res.status;
+                        rec.ok = res.status >= 200 && res.status < 400;
+                        add(rec.ok, rec.label);
+                        logger.info(`【健康检测】[${rec.index}] 结果: ${rec.ok ? '成功' : '失败'} | 状态: ${res.status} | 耗时: ${rec.durMs}ms`);
+                    } catch (e) {
+                        rec.end = Date.now();
+                        rec.durMs = rec.end - rec.start;
+                        if (e && (e.name === 'AbortError' || e.message === 'The operation was aborted.')) {
+                            rec.ok = false; rec.timeout = true;
+                            add(false, rec.label + ' 超时');
+                            logger.info(`【健康检测】[${rec.index}] 结果: 超时 | 耗时: ${rec.durMs}ms`);
+                        } else {
+                            rec.ok = false; rec.error = (e && e.message) || String(e);
+                            add(false, rec.label);
+                            logger.info(`【健康检测】[${rec.index}] 结果: 失败 | 错误: ${rec.error} | 耗时: ${rec.durMs}ms`);
+                        }
+                    }
+                })());
+            })();
+
+            // 6) Image（5 秒超时）
+            (function(){
+                const rec = createRec('Image', '创建 Image 元素尝试加载（超时 5 秒）');
+                tasks.push(new Promise(resolve => {
+                    const img = new Image();
+                    const to = setTimeout(() => {
+                        try { img.onload = img.onerror = null; } catch(e){}
+                        rec.end = Date.now();
+                        rec.durMs = rec.end - rec.start;
+                        rec.ok = false; rec.timeout = true;
+                        add(false, rec.label + ' 超时');
+                        logger.info(`【健康检测】[${rec.index}] 结果: 超时 | 耗时: ${rec.durMs}ms`);
+                        resolve(false);
+                    }, 5000);
+                    img.onload = () => {
+                        clearTimeout(to);
+                        rec.end = Date.now();
+                        rec.durMs = rec.end - rec.start;
+                        rec.ok = true;
+                        add(true, rec.label);
+                        logger.info(`【健康检测】[${rec.index}] 结果: 成功 | 耗时: ${rec.durMs}ms`);
+                        resolve(true);
+                    };
+                    img.onerror = () => {
+                        clearTimeout(to);
+                        rec.end = Date.now();
+                        rec.durMs = rec.end - rec.start;
+                        rec.ok = false;
+                        add(false, rec.label);
+                        logger.info(`【健康检测】[${rec.index}] 结果: 失败 | 耗时: ${rec.durMs}ms`);
+                        resolve(false);
+                    };
+                    img.src = urlWithQ;
+                }));
+            })();
+
+            // 7) 隐藏 iframe（5 秒超时）
+            (function(){
+                const rec = createRec('Iframe', '创建隐藏 iframe 尝试加载（超时 5 秒）');
+                tasks.push(new Promise(resolve => {
+                    const iframe = document.createElement('iframe');
+                    iframe.style.display = 'none';
+                    const clean = () => { try { document.body.removeChild(iframe); } catch(e){} };
+                    const to = setTimeout(() => {
+                        clean();
+                        rec.end = Date.now();
+                        rec.durMs = rec.end - rec.start;
+                        rec.ok = false; rec.timeout = true;
+                        add(false, rec.label + ' 超时');
+                        logger.info(`【健康检测】[${rec.index}] 结果: 超时 | 耗时: ${rec.durMs}ms`);
+                        resolve(false);
+                    }, 5000);
+                    iframe.onload = () => {
+                        clearTimeout(to);
+                        clean();
+                        rec.end = Date.now();
+                        rec.durMs = rec.end - rec.start;
+                        rec.ok = true;
+                        add(true, rec.label);
+                        logger.info(`【健康检测】[${rec.index}] 结果: 成功 | 耗时: ${rec.durMs}ms`);
+                        resolve(true);
+                    };
+                    iframe.onerror = () => {
+                        clearTimeout(to);
+                        clean();
+                        rec.end = Date.now();
+                        rec.durMs = rec.end - rec.start;
+                        rec.ok = false;
+                        add(false, rec.label);
+                        logger.info(`【健康检测】[${rec.index}] 结果: 失败 | 耗时: ${rec.durMs}ms`);
+                        resolve(false);
+                    };
+                    iframe.src = urlWithQ;
+                    document.body.appendChild(iframe);
+                }));
+            })();
+
+            // 8) Script 动态加载（5 秒超时）
+            (function(){
+                const rec = createRec('Script', '动态创建 script 标签尝试加载（超时 5 秒）');
+                tasks.push(new Promise(resolve => {
+                    const s = document.createElement('script');
+                    s.async = true;
+                    const to = setTimeout(() => {
+                        try { s.remove(); } catch(e){}
+                        rec.end = Date.now();
+                        rec.durMs = rec.end - rec.start;
+                        rec.ok = false; rec.timeout = true;
+                        add(false, rec.label + ' 超时');
+                        logger.info(`【健康检测】[${rec.index}] 结果: 超时 | 耗时: ${rec.durMs}ms`);
+                        resolve(false);
+                    }, 5000);
+                    s.onload = () => {
+                        clearTimeout(to);
+                        try { s.remove(); } catch(e){}
+                        rec.end = Date.now();
+                        rec.durMs = rec.end - rec.start;
+                        rec.ok = true;
+                        add(true, rec.label);
+                        logger.info(`【健康检测】[${rec.index}] 结果: 成功 | 耗时: ${rec.durMs}ms`);
+                        resolve(true);
+                    };
+                    s.onerror = () => {
+                        clearTimeout(to);
+                        try { s.remove(); } catch(e){}
+                        rec.end = Date.now();
+                        rec.durMs = rec.end - rec.start;
+                        rec.ok = false;
+                        add(false, rec.label);
+                        logger.info(`【健康检测】[${rec.index}] 结果: 失败 | 耗时: ${rec.durMs}ms`);
+                        resolve(false);
+                    };
+                    s.src = urlWithQ;
+                    document.head.appendChild(s);
+                }));
+            })();
 
             await Promise.allSettled(tasks);
             const success = results.filter(r => r.ok).length;
             const total = results.length;
             this.urlCheckResults = { success, total };
+
+            // 汇总输出
             logger.info(`【健康检测】完成: ${success}/${total}`);
+            details.forEach(rec => {
+                const r = rec.timeout ? '超时' : (rec.ok ? '成功' : '失败');
+                const st = rec.status != null ? ` | 状态: ${rec.status}` : '';
+                logger.info(`【健康检测】【明细】[${rec.index}] 方法: ${rec.label} | 操作: ${rec.operation} | 结果: ${r}${st} | 耗时: ${rec.durMs}ms`);
+            });
+
             return this.urlCheckResults;
         },
 
