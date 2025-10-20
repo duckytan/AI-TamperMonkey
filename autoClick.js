@@ -5,7 +5,12 @@
 // @description  自动进行Idle Pixel游戏中的各种操作
 // @author       Duckyの復活
 // @match        https://idle-pixel.com/login/play/
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @grant        GM_openInTab
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @connect      idle-pixel.com
+// @connect      *
 // @license      MIT
 // ==/UserScript==
 
@@ -231,7 +236,7 @@ Modals.open_furnace_dialogue()
             },
             errorRestart: {
                 enabled: false,
-                interval: 3, // 默认3次更合理
+                interval: 100, // 默认100次（与规范一致）
                 name: '错误重启'
             },
             timedRestart: {
@@ -1853,276 +1858,347 @@ Modals.open_furnace_dialogue()
             logger.debug(`${featurePrefix}定时器已设置，间隔: ${validInterval}ms`);
         },
 
-        // URL检测相关变量
+        // ============== 重启控制与URL检测 ==============
         urlCheckResults: { success: 0, total: 0 },
-        redirectCooldownUntil: 0,
-        wsErrorCount: 0,
-        timedRestartTimer: null,
+        _jumpLoopActive: false,
+        _jumpRetryTimeoutId: null,
+        _restartTimerIntervalId: null,
+        _wsErrorLastAt: 0,
 
-        // URL检测函数
-        checkUrlAvailability: async function(url) {
-            logger.debug(`【URL检测】开始检测URL: ${url}`);
-            let successCount = 0;
-            let totalCount = 0;
-            const results = [];
-
-            // 方法1: 图片加载检测
-            const imageLoadCheck = new Promise((resolve) => {
-                totalCount++;
-                const img = new Image();
-                img.onload = () => {
-                    successCount++;
-                    results.push('图片加载: 成功');
-                    resolve();
-                };
-                img.onerror = () => {
-                    results.push('图片加载: 失败');
-                    resolve();
-                };
-                img.src = `${url}?t=${Date.now()}&type=img`;
-                // 5秒超时
-                setTimeout(resolve, 5000);
-            });
-
-            // 方法2: fetch HEAD请求检测
-            const fetchHeadCheck = new Promise((resolve) => {
-                totalCount++;
-                fetch(url, {
-                    method: 'HEAD',
-                    mode: 'no-cors',
-                    cache: 'no-cache',
-                    headers: {
-                        'Accept': '*/*',
-                        'X-Requested-With': 'XMLHttpRequest'
-                    }
-                }).then(() => {
-                    successCount++;
-                    results.push('Fetch HEAD: 成功');
-                }).catch(() => {
-                    results.push('Fetch HEAD: 失败');
-                }).finally(resolve);
-            });
-
-            // 方法3: fetch GET请求检测
-            const fetchGetCheck = new Promise((resolve) => {
-                totalCount++;
-                fetch(url, {
-                    method: 'GET',
-                    mode: 'no-cors',
-                    cache: 'no-cache',
-                    headers: {
-                        'Accept': '*/*',
-                        'X-Requested-With': 'XMLHttpRequest'
-                    }
-                }).then(() => {
-                    successCount++;
-                    results.push('Fetch GET: 成功');
-                }).catch(() => {
-                    results.push('Fetch GET: 失败');
-                }).finally(resolve);
-            });
-
-            // 方法4: XMLHttpRequest检测
-            const xhrCheck = new Promise((resolve) => {
-                totalCount++;
-                const xhr = new XMLHttpRequest();
-                xhr.open('HEAD', url, true);
-                xhr.timeout = 5000;
-                xhr.onload = () => {
-                    successCount++;
-                    results.push('XHR: 成功');
-                };
-                xhr.onerror = xhr.ontimeout = () => {
-                    results.push('XHR: 失败');
-                };
-                xhr.onloadend = resolve;
-                try {
-                    xhr.send();
-                } catch (e) {
-                    results.push('XHR: 异常');
-                    resolve();
+        // 持久化（优先GM_*，否则localStorage）
+        _getStore: function(key, defVal) {
+            try {
+                if (typeof GM_getValue === 'function') {
+                    const v = GM_getValue('restart.' + key, '__undefined__');
+                    return v === '__undefined__' ? defVal : v;
                 }
+            } catch (e) {
+                // 忽略
+            }
+            try {
+                const raw = localStorage.getItem('ipa_restart_' + key);
+                if (raw === null || typeof raw === 'undefined') return defVal;
+                return JSON.parse(raw);
+            } catch (e) {
+                return defVal;
+            }
+        },
+        _setStore: function(key, val) {
+            try {
+                if (typeof GM_setValue === 'function') {
+                    GM_setValue('restart.' + key, val);
+                    return true;
+                }
+            } catch (e) { /* ignore */ }
+            try {
+                localStorage.setItem('ipa_restart_' + key, JSON.stringify(val));
+                return true;
+            } catch (e) {
+                return false;
+            }
+        },
+
+        // 加载/保存状态
+        _loadRestartState: function() {
+            const defaultUrl = 'https://idle-pixel.com/jwt/?signature=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImR1Y2t5cyIsInRva2VuIjoicGJrZGYyX3NoYTI1NiQzMjAwMDAkTTJoVVhKV25HUXNLenRZZzFHZWJrWiR6dDM3eEZyOEtXSWlmZ3dxRHpOT3hBcjFkeDJyTzBCdm1nYllteGJGQnhNPSJ9.xc6lCaZSC-hIQw7OmGO5aTHvVUF8U79womdRqHXJ-ls';
+            const st = this.restart = this.restart || {};
+            st.url = this._getStore('url', (config.features.refreshUrl && config.features.refreshUrl.url) || defaultUrl);
+            st.errorEnabled = this._getStore('errorEnabled', !!(config.features.errorRestart && config.features.errorRestart.enabled));
+            st.errorThreshold = this._getStore('errorThreshold', (config.features.errorRestart && config.features.errorRestart.interval) || 100);
+            st.errorCount = this._getStore('errorCount', 0);
+            st.timerEnabled = this._getStore('timerEnabled', !!(config.features.timedRestart && config.features.timedRestart.enabled));
+            st.timerSeconds = this._getStore('timerSeconds', ((config.features.timedRestart && config.features.timedRestart.interval) || 36000000) / 1000);
+            st.timerRemaining = this._getStore('timerRemaining', st.timerSeconds);
+            st.timerRunning = this._getStore('timerRunning', false);
+
+            // 回写到旧配置，保持兼容
+            if (!config.features.refreshUrl) config.features.refreshUrl = { enabled: true, url: st.url, name: '刷新网址' };
+            else config.features.refreshUrl.url = st.url;
+            if (!config.features.errorRestart) config.features.errorRestart = { enabled: st.errorEnabled, interval: st.errorThreshold, name: '错误重启' };
+            else { config.features.errorRestart.enabled = st.errorEnabled; config.features.errorRestart.interval = st.errorThreshold; }
+            if (!config.features.timedRestart) config.features.timedRestart = { enabled: st.timerEnabled, interval: st.timerSeconds * 1000, name: '定时重启' };
+            else { config.features.timedRestart.enabled = st.timerEnabled; config.features.timedRestart.interval = st.timerSeconds * 1000; }
+
+            // 同步到旧字段
+            this.wsErrorCount = st.errorCount || 0;
+        },
+        _saveRestartState: function() {
+            const st = this.restart || {};
+            this._setStore('url', st.url);
+            this._setStore('errorEnabled', !!st.errorEnabled);
+            this._setStore('errorThreshold', parseInt(st.errorThreshold) || 100);
+            this._setStore('errorCount', parseInt(st.errorCount) || 0);
+            this._setStore('timerEnabled', !!st.timerEnabled);
+            this._setStore('timerSeconds', parseInt(st.timerSeconds) || 36000);
+            this._setStore('timerRemaining', parseInt(st.timerRemaining) || 0);
+            this._setStore('timerRunning', !!st.timerRunning);
+
+            // 兼容旧配置
+            if (config.features.refreshUrl) config.features.refreshUrl.url = st.url;
+            if (config.features.errorRestart) { config.features.errorRestart.enabled = st.errorEnabled; config.features.errorRestart.interval = st.errorThreshold; }
+            if (config.features.timedRestart) { config.features.timedRestart.enabled = st.timerEnabled; config.features.timedRestart.interval = st.timerSeconds * 1000; }
+            config.save();
+        },
+
+        _formatHHMMSS: function(totalSeconds) {
+            totalSeconds = Math.max(0, Math.floor(totalSeconds));
+            const h = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+            const m = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+            const s = String(totalSeconds % 60).padStart(2, '0');
+            return `${h}:${m}:${s}`;
+        },
+
+        // UI更新（若元素存在）
+        _updateRestartUI: function() {
+            const st = this.restart || {};
+            const urlInput = document.querySelector('#restart-url-input');
+            if (urlInput && urlInput.value !== st.url) urlInput.value = st.url || '';
+            const detectSpan = document.querySelector('#restart-detect-result');
+            if (detectSpan && this.urlCheckResults) detectSpan.textContent = `${this.urlCheckResults.success}/${this.urlCheckResults.total}`;
+
+            const errToggle = document.querySelector('#error-restart-toggle');
+            if (errToggle) errToggle.checked = !!st.errorEnabled;
+            const errTh = document.querySelector('#error-threshold-input');
+            if (errTh) errTh.value = st.errorThreshold || 100;
+            const errCountSpan = document.querySelector('#error-count-display');
+            if (errCountSpan) errCountSpan.textContent = `${st.errorCount}/${st.errorThreshold || 100}`;
+
+            const timerToggle = document.querySelector('#timer-restart-toggle');
+            if (timerToggle) timerToggle.checked = !!st.timerEnabled;
+            const timerSec = document.querySelector('#timer-seconds-input');
+            if (timerSec) timerSec.value = st.timerSeconds || 36000;
+            const timerRemain = document.querySelector('#timer-remaining-display');
+            if (timerRemain) timerRemain.textContent = this._formatHHMMSS(st.timerRemaining || st.timerSeconds || 0);
+
+            const startBtn = document.querySelector('#timer-start-btn');
+            const pauseBtn = document.querySelector('#timer-pause-btn');
+            if (startBtn) startBtn.disabled = !st.timerEnabled || !!st.timerRunning;
+            if (pauseBtn) pauseBtn.disabled = !st.timerEnabled || !st.timerRunning;
+        },
+
+        // 运行多方式URL健康检测（≥8种）
+        runHealthChecks: async function(url) {
+            logger.info(`【健康检测】开始检测: ${url}`);
+            const results = [];
+            const add = (ok, label) => { results.push({ ok, label }); };
+            const withTimeout = (p, ms, label) => new Promise(resolve => {
+                let done = false;
+                const to = setTimeout(() => { if (!done) { done = true; add(false, label + ' 超时'); resolve(false); } }, ms);
+                p.then(() => { if (!done) { done = true; clearTimeout(to); add(true, label); resolve(true); } })
+                 .catch(() => { if (!done) { done = true; clearTimeout(to); add(false, label); resolve(false); } });
             });
 
-            // 方法5: iframe加载检测
-            const iframeCheck = new Promise((resolve) => {
-                totalCount++;
+            const cacheBust = `__t=${Date.now()}_${Math.random().toString(36).slice(2)}`;
+            const urlWithQ = url.includes('?') ? `${url}&${cacheBust}` : `${url}?${cacheBust}`;
+
+            const tasks = [];
+            // 1) GM_xmlhttpRequest GET 2xx/3xx 成功
+            try {
+                if (typeof GM_xmlhttpRequest === 'function') {
+                    tasks.push(new Promise(resolve => {
+                        GM_xmlhttpRequest({
+                            method: 'GET', url: urlWithQ, timeout: 8000, redirect: 'follow',
+                            onload: (res) => { add(res.status >= 200 && res.status < 400, 'GM GET'); resolve(); },
+                            onerror: () => { add(false, 'GM GET'); resolve(); },
+                            ontimeout: () => { add(false, 'GM GET 超时'); resolve(); }
+                        });
+                    }));
+                }
+            } catch (e) { /* ignore */ }
+
+            // 2) GM_xmlhttpRequest HEAD
+            try {
+                if (typeof GM_xmlhttpRequest === 'function') {
+                    tasks.push(new Promise(resolve => {
+                        GM_xmlhttpRequest({
+                            method: 'HEAD', url: urlWithQ, timeout: 8000,
+                            onload: (res) => { add(res.status >= 200 && res.status < 400, 'GM HEAD'); resolve(); },
+                            onerror: () => { add(false, 'GM HEAD'); resolve(); },
+                            ontimeout: () => { add(false, 'GM HEAD 超时'); resolve(); }
+                        });
+                    }));
+                }
+            } catch (e) { /* ignore */ }
+
+            // 3) GM_xmlhttpRequest GET（3-5s超时快速失败）
+            try {
+                if (typeof GM_xmlhttpRequest === 'function') {
+                    tasks.push(new Promise(resolve => {
+                        GM_xmlhttpRequest({
+                            method: 'GET', url: urlWithQ, timeout: 3500,
+                            onload: (res) => { add(res.status >= 200 && res.status < 400, 'GM GET(快)'); resolve(); },
+                            onerror: () => { add(false, 'GM GET(快)'); resolve(); },
+                            ontimeout: () => { add(false, 'GM GET(快) 超时'); resolve(); }
+                        });
+                    }));
+                }
+            } catch (e) { /* ignore */ }
+
+            // 4) fetch GET no-store
+            tasks.push(withTimeout(fetch(urlWithQ, { method: 'GET', cache: 'no-store' }), 5000, 'fetch GET'));
+            // 5) fetch HEAD
+            tasks.push(withTimeout(fetch(urlWithQ, { method: 'HEAD', cache: 'no-store' }), 5000, 'fetch HEAD'));
+            // 6) Image
+            tasks.push(new Promise(resolve => {
+                const img = new Image();
+                img.onload = () => { add(true, 'Image'); resolve(true); };
+                img.onerror = () => { add(false, 'Image'); resolve(false); };
+                img.src = urlWithQ;
+                setTimeout(() => resolve(false), 5000);
+            }));
+            // 7) 隐藏iframe
+            tasks.push(new Promise(resolve => {
                 const iframe = document.createElement('iframe');
                 iframe.style.display = 'none';
-                iframe.onload = () => {
-                    successCount++;
-                    results.push('Iframe: 成功');
-                    document.body.removeChild(iframe);
-                    resolve();
-                };
-                iframe.onerror = () => {
-                    results.push('Iframe: 失败');
-                    document.body.removeChild(iframe);
-                    resolve();
-                };
-                iframe.src = `${url}?t=${Date.now()}&type=iframe`;
+                iframe.onload = () => { add(true, 'Iframe'); try { document.body.removeChild(iframe); } catch(e){} resolve(true); };
+                iframe.onerror = () => { add(false, 'Iframe'); try { document.body.removeChild(iframe); } catch(e){} resolve(false); };
+                iframe.src = urlWithQ;
                 document.body.appendChild(iframe);
-                // 5秒超时
-                setTimeout(() => {
-                    if (document.body.contains(iframe)) {
-                        document.body.removeChild(iframe);
-                        results.push('Iframe: 超时');
-                        resolve();
+                setTimeout(() => { try { document.body.removeChild(iframe); } catch(e){} add(false, 'Iframe 超时'); resolve(false); }, 5000);
+            }));
+            // 8) Script 动态加载
+            tasks.push(new Promise(resolve => {
+                const s = document.createElement('script');
+                s.async = true;
+                s.onload = () => { add(true, 'Script'); try { s.remove(); } catch(e){} resolve(true); };
+                s.onerror = () => { add(false, 'Script'); try { s.remove(); } catch(e){} resolve(false); };
+                s.src = urlWithQ;
+                document.head.appendChild(s);
+                setTimeout(() => { try { s.remove(); } catch(e){} add(false, 'Script 超时'); resolve(false); }, 5000);
+            }));
+
+            await Promise.allSettled(tasks);
+            const success = results.filter(r => r.ok).length;
+            const total = results.length;
+            this.urlCheckResults = { success, total };
+            logger.info(`【健康检测】完成: ${success}/${total}`);
+            return this.urlCheckResults;
+        },
+
+        // 统一跳转流程（带健康检测与10分钟重试）
+        jumpWithHealthCheck: function(url) {
+            if (!url) url = (this.restart && this.restart.url) || (config.features.refreshUrl && config.features.refreshUrl.url) || window.location.href;
+            if (this._jumpLoopActive) {
+                logger.warn('【跳转流程】已有跳转流程在进行，忽略新的请求');
+                return false;
+            }
+            this._jumpLoopActive = true;
+            const attempt = async () => {
+                const res = await this.runHealthChecks(url);
+                const ok = res.total > 0 && (res.success / res.total) >= 0.6;
+                const detectSpan = document.querySelector('#restart-detect-result');
+                if (detectSpan) detectSpan.textContent = `${res.success}/${res.total}`;
+                if (ok) {
+                    logger.info('【跳转流程】健康检测达标，执行跳转');
+                    try {
+                        if (typeof GM_openInTab === 'function') {
+                            // 优先同页刷新
+                            window.location.assign(url);
+                        } else {
+                            window.location.assign(url);
+                        }
+                    } catch (e) {
+                        window.location.href = url;
                     }
-                }, 5000);
-            });
-
-            // 等待所有检测完成
-            await Promise.all([imageLoadCheck, fetchHeadCheck, fetchGetCheck, xhrCheck, iframeCheck]);
-
-            this.urlCheckResults = { success: successCount, total: totalCount };
-            logger.debug(`【URL检测】完成检测，结果: ${successCount}/${totalCount}`);
-            logger.debug(`【URL检测】详细结果: ${results.join(', ')}`);
-
-            return { success: successCount, total: totalCount };
-        },
-
-        // 确保重定向相关属性存在
-        ensureRedirectProperties: function() {
-            if (!this.redirectCooldownUntil) {
-                this.redirectCooldownUntil = 0;
-            }
-            if (!this.wsErrorCount) {
-                this.wsErrorCount = 0;
-            }
-        },
-
-        // 检查重定向冷却
-        isRedirectOnCooldown: function() {
-            const now = Date.now();
-            if (now < this.redirectCooldownUntil) {
-                const remaining = Math.ceil((this.redirectCooldownUntil - now) / 1000 / 60);
-                logger.warn(`【重定向管理】重定向冷却中，剩余${remaining}分钟`);
-                return true;
-            }
-            return false;
-        },
-
-        // 设置重定向冷却
-        setRedirectCooldown: function() {
-            this.redirectCooldownUntil = Date.now() + (10 * 60 * 1000); // 10分钟冷却
-            logger.info('【重定向管理】已设置10分钟重定向冷却');
-        },
-
-        // 执行重定向
-        performRedirect: async function(options = {}) {
-            const { skipCooldown = false, skipCheck = false } = options;
-
-            // 确保属性初始化
-            this.ensureRedirectProperties();
-
-            const url = config.features.refreshUrl.url || window.location.href;
-            logger.info(`【重定向管理】准备重定向到: ${url}`);
-
-            // 如果与当前同源，直接跳过检测
-            let sameOrigin = false;
-            try {
-                const target = new URL(url, window.location.href);
-                sameOrigin = target.origin === window.location.origin;
-            } catch (e) {
-                // 忽略URL解析错误，按不同源处理
-            }
-
-            // 检查重定向冷却（除非跳过冷却）
-            if (!skipCooldown && this.isRedirectOnCooldown()) {
-                logger.warn('【重定向管理】冷却中，延迟重定向');
-                return false;
-            }
-
-            // 检查URL可用性（除非跳过检测或同源）
-            if (!skipCheck && !sameOrigin) {
-                const checkResult = await this.checkUrlAvailability(url);
-                const successRate = checkResult.success / checkResult.total;
-
-                logger.info(`【重定向管理】URL检测结果: ${checkResult.success}/${checkResult.total} (${Math.round(successRate * 100)}%)`);
-
-                if (successRate < 0.6) {
-                    logger.warn(`【重定向管理】URL检测失败，通过率${Math.round(successRate * 100)}% < 60%`);
-                    this.setRedirectCooldown();
-                    return false;
+                } else {
+                    logger.warn('【跳转流程】健康检测未达标，10分钟后重试');
+                    const id = setTimeout(attempt, 10 * 60 * 1000);
+                    this._jumpRetryTimeoutId = id;
+                    cleanupResources.addTimeout(id);
                 }
-            }
-
-            logger.info('【重定向管理】开始重定向');
-            try {
-                window.location.href = url;
-            } catch (e) {
-                logger.error('【重定向管理】重定向失败:', e);
-                return false;
-            }
+            };
+            attempt();
             return true;
         },
 
-        // 处理WebSocket错误
+        // WebSocket错误计数（带去抖）
         handleWebSocketError: function() {
-            // 确保属性初始化
-            this.ensureRedirectProperties();
-
-            if (!config.features.errorRestart.enabled) {
-                logger.debug('【错误重启】功能未启用，忽略WebSocket错误');
+            this._loadRestartState();
+            const st = this.restart;
+            if (!st.errorEnabled) return;
+            const now = Date.now();
+            if (now - (this._wsErrorLastAt || 0) < 1000) {
+                logger.debug('【错误重启】去抖：忽略短时间内的重复错误');
                 return;
             }
-
-            this.wsErrorCount++;
-            const maxErrors = config.features.errorRestart.interval || 3; // 默认阈值3次
-
-            logger.info(`【错误重启】检测到WebSocket错误，当前计数: ${this.wsErrorCount}/${maxErrors}`);
-
-            // 更新UI显示错误计数
-            const errorCountElement = document.querySelector('.error-count');
-            if (errorCountElement) {
-                errorCountElement.textContent = this.wsErrorCount.toString();
-            }
-
-            if (this.wsErrorCount >= maxErrors) {
-                logger.warn(`【错误重启】WebSocket错误达到阈值(${maxErrors}次)，触发重定向`);
-                this.wsErrorCount = 0;
-                this.performRedirect();
+            this._wsErrorLastAt = now;
+            st.errorCount = (st.errorCount || 0) + 1;
+            this.wsErrorCount = st.errorCount;
+            this._saveRestartState();
+            this._updateRestartUI();
+            logger.info(`【错误重启】计数: ${st.errorCount}/${st.errorThreshold}`);
+            if (st.errorCount >= (st.errorThreshold || 100)) {
+                logger.warn('【错误重启】达到阈值，触发跳转流程');
+                st.errorCount = 0;
+                this._saveRestartState();
+                this._updateRestartUI();
+                this.jumpWithHealthCheck(st.url);
             }
         },
-
-        // 重置WebSocket错误计数
         resetWebSocketErrorCount: function() {
+            this._loadRestartState();
+            const st = this.restart;
+            st.errorCount = 0;
             this.wsErrorCount = 0;
-            logger.info('【错误重启】WebSocket错误计数已重置');
-            // 更新UI显示
-            const errorCountElement = document.querySelector('.error-count');
-            if (errorCountElement) {
-                errorCountElement.textContent = '0';
-            }
+            this._saveRestartState();
+            this._updateRestartUI();
+            logger.info('【错误重启】计数已清零');
         },
 
-        // 启动/停止定时重启功能
-        toggleTimedRestart: function(enabled) {
-            if (enabled) {
-                if (this.timedRestartTimer) {
-                    clearTimeout(this.timedRestartTimer);
+        // 定时重启控制
+        _startRestartTimerLoop: function() {
+            if (this._restartTimerIntervalId) return;
+            const id = setInterval(() => {
+                const st = this.restart;
+                if (!st || !st.timerEnabled || !st.timerRunning) return;
+                st.timerRemaining = Math.max(0, (st.timerRemaining || 0) - 1);
+                this._saveRestartState();
+                this._updateRestartUI();
+                if (st.timerRemaining <= 0) {
+                    logger.info('【定时重启】倒计时结束，触发跳转流程');
+                    st.timerRunning = false;
+                    this._saveRestartState();
+                    this.jumpWithHealthCheck(st.url);
                 }
-
-                const interval = config.features.timedRestart.interval;
-                logger.info(`【定时重启】已启用，将在${interval / 1000}秒后重定向`);
-
-                const that = this;
-                this.timedRestartTimer = setTimeout(() => {
-                    logger.info('【定时重启】时间到达，触发重定向');
-                    that.performRedirect({ skipCooldown: true, skipCheck: true });
-                }, interval);
-
-                // 添加到清理资源
-                cleanupResources.addTimeout(this.timedRestartTimer);
-            } else if (this.timedRestartTimer) {
-                clearTimeout(this.timedRestartTimer);
-                this.timedRestartTimer = null;
-                logger.info('【定时重启】已禁用');
+            }, 1000);
+            this._restartTimerIntervalId = id;
+            cleanupResources.addInterval(id);
+        },
+        _stopRestartTimerLoop: function() {
+            if (this._restartTimerIntervalId) {
+                clearInterval(this._restartTimerIntervalId);
+                this._restartTimerIntervalId = null;
             }
         },
+        toggleTimedRestart: function(enabled) {
+            this._loadRestartState();
+            const st = this.restart;
+            st.timerEnabled = !!enabled;
+            if (enabled) {
+                if (st.timerRemaining <= 0 || !st.timerRemaining) st.timerRemaining = st.timerSeconds || 36000;
+                st.timerRunning = true;
+                this._startRestartTimerLoop();
+            } else {
+                st.timerRunning = false;
+            }
+            this._saveRestartState();
+            this._updateRestartUI();
+            logger.info(`【定时重启】${enabled ? '已启用' : '已禁用'}`);
+        },
 
-        // 停止功能
+        // 兼容旧方法：返回毫秒
+        getRemainingRestartTime: function() {
+            this._loadRestartState();
+            return Math.max(0, (this.restart && this.restart.timerRemaining || 0) * 1000);
+        },
+
+        // 保留兼容接口，内部改为走健康检测流程
+        performRedirect: function() {
+            const url = (this.restart && this.restart.url) || (config.features.refreshUrl && config.features.refreshUrl.url) || window.location.href;
+            return this.jumpWithHealthCheck(url);
+        },
+
+        // 停止功能（保留原逻辑，增强定时重启的停止）
         stopFeature: function(featureName) {
             const featurePrefix = featureName === 'copperSmelt' ? '【矿石熔炼】' :
                                  featureName === 'oilManagement' ? '【石油管理】' :
@@ -2133,21 +2209,17 @@ Modals.open_furnace_dialogue()
                                  featureName === 'timedRestart' ? '【定时重启】' :
                                  featureName === 'animalCollection' ? '【动物收集】' : '';
 
-            // 特殊处理定时重启
-            if (featureName === 'timedRestart' && this.timedRestartTimer) {
-                logger.info(`${featurePrefix}功能停止，清除定时器`);
-                clearTimeout(this.timedRestartTimer);
-                this.timedRestartTimer = null;
+            if (featureName === 'timedRestart') {
+                this.toggleTimedRestart(false);
+                this._stopRestartTimerLoop();
             }
 
-            // 处理普通定时器
             if (timers[featureName]) {
                 logger.info(`${featurePrefix}功能停止，清除定时器ID: ${timers[featureName]}`);
                 clearInterval(timers[featureName]);
                 timers[featureName] = null;
             }
 
-            // 确保配置状态与实际运行状态一致
             if (config.features[featureName]) {
                 config.features[featureName].enabled = false;
                 config.save();
@@ -3549,339 +3621,168 @@ Modals.open_furnace_dialogue()
         panel.appendChild(systemSection);
         const systemContent = systemSection.contentContainer;
 
-        // 错误重启功能 - 直接创建设置行，不添加单独的描述元素
+        // 重启控制小节
+        featureManager._loadRestartState();
+        const restartState = featureManager.restart;
 
-        // 再创建错误重启功能设置行
-        const errorRestartRow = document.createElement('div');
-        errorRestartRow.className = 'feature-row';
-        const errorRestartEnabled = config.features.errorRestart && config.features.errorRestart.enabled;
-        const errorRestartCount = config.features.errorRestart && config.features.errorRestart.interval || 100;
+        // 子标题
+        const restartTitleRow = document.createElement('div');
+        restartTitleRow.className = 'feature-row';
+        restartTitleRow.innerHTML = `<span class="feature-name" style="font-weight: bold;">重启控制</span><div class="feature-description">错误重启、定时重启与刷新检测统一配置</div>`;
+        systemContent.appendChild(restartTitleRow);
 
-        errorRestartRow.innerHTML = `
-            <input type="checkbox" class="feature-checkbox" data-feature="errorRestart" ${errorRestartEnabled ? 'checked' : ''}>
-            <span class="feature-name" title="当检测到WebSocket错误达到指定次数时，自动重定向到刷新网址" data-bs-toggle="tooltip" data-bs-placement="right">错误重启</span>
-            <input type="number" class="feature-interval" value="${errorRestartCount}" min="1" step="1">
+        // 刷新网址与检测
+        const restartUrlRow = document.createElement('div');
+        restartUrlRow.className = 'feature-row';
+        restartUrlRow.innerHTML = `
+            <span class="feature-name" title="用于自动刷新或手动刷新时的目标网址">刷新网址</span>
+            <input id="restart-url-input" type="text" class="refresh-url-input" value="${restartState.url || ''}">
+            <button id="restart-refresh-btn" class="check-url-button" style="background:#3b82f6;">刷新</button>
+            <button id="restart-detect-btn" class="check-url-button" style="background:#16a34a;">检测</button>
+            <span id="restart-detect-result" class="url-check-result">--/--</span>
+        `;
+        systemContent.appendChild(restartUrlRow);
+
+        // 错误重启
+        const errorCtrlRow = document.createElement('div');
+        errorCtrlRow.className = 'feature-row';
+        errorCtrlRow.innerHTML = `
+            <input id="error-restart-toggle" type="checkbox" class="feature-checkbox" ${restartState.errorEnabled ? 'checked' : ''}>
+            <span class="feature-name" title="监听WebSocket错误/关闭事件，累计达到阈值后执行跳转流程">错误重启</span>
+            <input id="error-threshold-input" type="number" class="feature-interval" value="${restartState.errorThreshold || 100}" min="1" step="1">
             <span class="interval-label">次</span>
-            <span class="error-count" style="margin-left: auto; color: #ff6b6b; font-weight: bold;">${(featureManager && typeof featureManager.wsErrorCount === 'number') ? featureManager.wsErrorCount : 0}</span>
+            <span id="error-count-display" class="error-count" style="margin-left:auto;">${restartState.errorCount || 0}/${restartState.errorThreshold || 100}</span>
+            <button id="error-reset-btn" class="check-url-button" style="background:#ef4444;">重置计数</button>
         `;
+        systemContent.appendChild(errorCtrlRow);
 
-        systemContent.appendChild(errorRestartRow);
-
-        // 绑定事件
-        errorRestartRow.querySelector('input[data-feature="errorRestart"]').addEventListener('change', function(e) {
-            if (!config.features.errorRestart) {
-                config.features.errorRestart = { enabled: false, interval: 3, name: '错误重启' };
-            }
-            toggleFeature('errorRestart', e.target.checked);
-            if (e.target.checked) {
-                featureManager.resetWebSocketErrorCount();
-                // 重置错误计数显示
-                if (errorRestartRow.querySelector('.error-count')) {
-                    errorRestartRow.querySelector('.error-count').textContent = '0';
-                }
-            }
-            // 功能状态变化后调整面板大小
-            setTimeout(adjustPanelSize, 0);
-        });
-
-        errorRestartRow.querySelector('.feature-interval').addEventListener('change', function(e) {
-            if (!config.features.errorRestart) {
-                config.features.errorRestart = { enabled: false, interval: 3, name: '错误重启' };
-            }
-            const value = parseInt(e.target.value);
-            if (!isNaN(value) && value > 0) {
-                config.features.errorRestart.interval = value;
-                config.save();
-                logger.info(`【错误重启】已设置错误阈值为${value}次`);
-            } else {
-                e.target.value = errorRestartCount;
-            }
-        });
-
-        // 定时重启功能 - 直接创建设置行，不添加单独的描述元素
-
-        // 再创建定时重启功能设置行
-        const timedRestartRow = document.createElement('div');
-        timedRestartRow.className = 'feature-row';
-        const timedRestartEnabled = config.features.timedRestart && config.features.timedRestart.enabled;
-        const timedRestartSeconds = (config.features.timedRestart && config.features.timedRestart.interval || 36000000) / 1000;
-
-        timedRestartRow.innerHTML = `
-            <input type="checkbox" class="feature-checkbox" data-feature="timedRestart" ${timedRestartEnabled ? 'checked' : ''}>
-            <span class="feature-name" title="达到指定时间后，自动重定向到刷新网址" data-bs-toggle="tooltip" data-bs-placement="right">定时重启</span>
-            <input type="number" class="feature-interval" value="${timedRestartSeconds}" min="60" step="60">
+        // 定时重启
+        const timerCtrlRow = document.createElement('div');
+        timerCtrlRow.className = 'feature-row';
+        timerCtrlRow.innerHTML = `
+            <input id="timer-restart-toggle" type="checkbox" class="feature-checkbox" ${restartState.timerEnabled ? 'checked' : ''}>
+            <span class="feature-name" title="根据设置的时长倒计时，到时触发跳转流程">定时重启</span>
+            <input id="timer-seconds-input" type="number" class="feature-interval" value="${restartState.timerSeconds || 36000}" min="60" step="60">
             <span class="interval-label">秒</span>
-            <span class="countdown-timer" style="margin-left: auto; color: #4ecdc4; font-weight: bold;">00:00:00</span>
+            <button id="timer-start-btn" class="check-url-button" style="background:#0ea5e9;">开始</button>
+            <button id="timer-pause-btn" class="check-url-button" style="background:#f59e0b;">暂停</button>
+            <button id="timer-reset-btn" class="check-url-button" style="background:#64748b;">重置</button>
+            <span id="timer-remaining-display" class="countdown-display" style="margin-left:auto;">${featureManager._formatHHMMSS(restartState.timerRemaining || restartState.timerSeconds || 0)}</span>
         `;
+        systemContent.appendChild(timerCtrlRow);
 
-        systemContent.appendChild(timedRestartRow);
+        // 事件绑定
+        // URL变更
+        restartUrlRow.querySelector('#restart-url-input').addEventListener('change', (e) => {
+            featureManager._loadRestartState();
+            featureManager.restart.url = e.target.value.trim();
+            featureManager._saveRestartState();
+        });
+        // 刷新（跳转流程）
+        restartUrlRow.querySelector('#restart-refresh-btn').addEventListener('click', () => {
+            featureManager._loadRestartState();
+            const url = featureManager.restart.url;
+            if (!url) { logger.warn('【重启控制】URL不能为空'); return; }
+            featureManager.jumpWithHealthCheck(url);
+        });
+        // 检测
+        restartUrlRow.querySelector('#restart-detect-btn').addEventListener('click', async () => {
+            featureManager._loadRestartState();
+            const url = featureManager.restart.url;
+            if (!url) { logger.warn('【健康检测】URL不能为空'); return; }
+            const resultSpan = document.querySelector('#restart-detect-result');
+            if (resultSpan) resultSpan.textContent = '检测中...';
+            const res = await featureManager.runHealthChecks(url);
+            if (resultSpan) resultSpan.textContent = `${res.success}/${res.total}`;
+        });
 
-        // 定义更新倒计时显示的函数
-        // 倒计时定时器变量
-        let countdownInterval;
-
-        function updateCountdownDisplay() {
-            const countdownElement = timedRestartRow.querySelector('.countdown-timer');
-            if (!countdownElement || !config.features.timedRestart || !config.features.timedRestart.enabled) {
-                return;
-            }
-
-            // 获取剩余时间
-            const remainingTime = featureManager.getRemainingRestartTime ? featureManager.getRemainingRestartTime() : 0;
-
-            if (remainingTime > 0) {
-                const hours = Math.floor(remainingTime / 3600000);
-                const minutes = Math.floor((remainingTime % 3600000) / 60000);
-                const seconds = Math.floor((remainingTime % 60000) / 1000);
-
-                const formattedTime =
-                    String(hours).padStart(2, '0') + ':' +
-                    String(minutes).padStart(2, '0') + ':' +
-                    String(seconds).padStart(2, '0');
-
-                countdownElement.textContent = formattedTime;
+        // 错误重启逻辑
+        errorCtrlRow.querySelector('#error-restart-toggle').addEventListener('change', (e) => {
+            featureManager._loadRestartState();
+            featureManager.restart.errorEnabled = !!e.target.checked;
+            featureManager._saveRestartState();
+            // 同步旧开关
+            toggleFeature('errorRestart', featureManager.restart.errorEnabled);
+            // 启用时清零计数可选，不强制
+        });
+        errorCtrlRow.querySelector('#error-threshold-input').addEventListener('change', (e) => {
+            const val = parseInt(e.target.value);
+            featureManager._loadRestartState();
+            if (!isNaN(val) && val > 0) {
+                featureManager.restart.errorThreshold = val;
+                featureManager._saveRestartState();
             } else {
-                countdownElement.textContent = '00:00:00';
+                e.target.value = featureManager.restart.errorThreshold || 100;
             }
+            featureManager._updateRestartUI();
+        });
+        errorCtrlRow.querySelector('#error-reset-btn').addEventListener('click', () => {
+            featureManager.resetWebSocketErrorCount();
+        });
+
+        // 定时重启逻辑
+        const syncTimerButtons = () => featureManager._updateRestartUI();
+        timerCtrlRow.querySelector('#timer-restart-toggle').addEventListener('change', (e) => {
+            featureManager.toggleTimedRestart(!!e.target.checked);
+            syncTimerButtons();
+        });
+        timerCtrlRow.querySelector('#timer-seconds-input').addEventListener('change', (e) => {
+            const v = parseInt(e.target.value);
+            featureManager._loadRestartState();
+            if (!isNaN(v) && v >= 1) {
+                featureManager.restart.timerSeconds = v;
+                if (!featureManager.restart.timerRemaining || featureManager.restart.timerRemaining > v) {
+                    featureManager.restart.timerRemaining = v;
+                }
+                featureManager._saveRestartState();
+            } else {
+                e.target.value = featureManager.restart.timerSeconds || 36000;
+            }
+            featureManager._updateRestartUI();
+        });
+        timerCtrlRow.querySelector('#timer-start-btn').addEventListener('click', () => {
+            featureManager._loadRestartState();
+            featureManager.restart.timerEnabled = true;
+            featureManager.restart.timerRunning = true;
+            if (!featureManager.restart.timerRemaining || featureManager.restart.timerRemaining <= 0) {
+                featureManager.restart.timerRemaining = featureManager.restart.timerSeconds || 36000;
+            }
+            featureManager._saveRestartState();
+            featureManager._startRestartTimerLoop();
+            featureManager._updateRestartUI();
+        });
+        timerCtrlRow.querySelector('#timer-pause-btn').addEventListener('click', () => {
+            featureManager._loadRestartState();
+            featureManager.restart.timerRunning = false;
+            featureManager._saveRestartState();
+            featureManager._updateRestartUI();
+        });
+        timerCtrlRow.querySelector('#timer-reset-btn').addEventListener('click', () => {
+            featureManager._loadRestartState();
+            featureManager.restart.timerRemaining = featureManager.restart.timerSeconds || 36000;
+            featureManager._saveRestartState();
+            featureManager._updateRestartUI();
+        });
+
+        // 初始化UI显示与定时器
+        featureManager._saveRestartState();
+        featureManager._updateRestartUI();
+        if (restartState.timerEnabled) {
+            featureManager._startRestartTimerLoop();
         }
 
-        // 绑定事件
-        timedRestartRow.querySelector('input[data-feature="timedRestart"]').addEventListener('change', function(e) {
-            if (!config.features.timedRestart) {
-                config.features.timedRestart = { enabled: false, interval: 36000000, name: '定时重启' };
-            }
-            toggleFeature('timedRestart', e.target.checked);
-            featureManager.toggleTimedRestart(e.target.checked);
-            // 初始化倒计时显示
-            if (e.target.checked) {
-                updateCountdownDisplay();
-            } else {
-                if (timedRestartRow.querySelector('.countdown-timer')) {
-                    timedRestartRow.querySelector('.countdown-timer').textContent = '00:00:00';
-                }
-            }
-            // 功能状态变化后调整面板大小
-            setTimeout(adjustPanelSize, 0);
-        });
-
-        timedRestartRow.querySelector('.feature-interval').addEventListener('change', function(e) {
-            if (!config.features.timedRestart) {
-                config.features.timedRestart = { enabled: false, interval: 36000000, name: '定时重启' };
-            }
-            const value = parseInt(e.target.value);
-            if (!isNaN(value) && value > 0) {
-                const msValue = value * 1000;
-                updateFeatureInterval('timedRestart', msValue);
-                if (config.features.timedRestart.enabled) {
-                    featureManager.toggleTimedRestart(false);
-                    featureManager.toggleTimedRestart(true);
-                    updateCountdownDisplay();
-                }
-            } else {
-                e.target.value = timedRestartSeconds;
-            }
-        });
-
-        // 刷新网址功能 - 直接创建设置行，不添加单独的描述元素
-
-        // 再创建刷新网址功能设置行
-        const refreshUrlRow = document.createElement('div');
-        refreshUrlRow.className = 'feature-row';
-        const refreshUrl = config.features.refreshUrl && config.features.refreshUrl.url || '';
-
-        refreshUrlRow.innerHTML = `
-            <span class="feature-name" title="错误重启和定时重启功能将重定向到此网址" data-bs-toggle="tooltip" data-bs-placement="right">刷新网址</span>
-            <input type="text" class="refresh-url-input" value="${refreshUrl}">
-            <button class="refresh-url-button">刷新</button>
-            <button class="check-url-button">检测</button>
-            <span class="url-check-result">--/--</span>
-        `;
-
-        systemContent.appendChild(refreshUrlRow);
-
-        // 绑定事件
-        refreshUrlRow.querySelector('.refresh-url-input').addEventListener('change', function(e) {
-            if (!config.features.refreshUrl) {
-                config.features.refreshUrl = { enabled: true, url: '', name: '刷新网址' };
-            }
-            config.features.refreshUrl.url = e.target.value;
-            config.save();
-            logger.info('【刷新网址】已更新URL');
-        });
-
-        // 刷新按钮事件
-        refreshUrlRow.querySelector('.refresh-url-button').addEventListener('click', function() {
-            const url = refreshUrlRow.querySelector('.refresh-url-input').value;
-            if (!url) {
-                logger.warn('【刷新网址】URL不能为空');
-                return;
-            }
-
-            logger.info(`【刷新网址】即将跳转到: ${url}`);
-            // 使用try-catch处理可能的跳转错误
-            try {
-                window.location.href = url;
-            } catch (e) {
-                logger.error('【刷新网址】跳转失败:', e);
-            }
-        });
-
-        // URL检测按钮事件
-        refreshUrlRow.querySelector('.check-url-button').addEventListener('click', async function() {
-            const url = refreshUrlRow.querySelector('.refresh-url-input').value;
-            if (!url) {
-                logger.warn('【URL检测】URL不能为空');
-                return;
-            }
-
-            const resultElement = refreshUrlRow.querySelector('.url-check-result');
-            resultElement.textContent = '检测中...';
-
-
-
-
-
-        // 更新错误计数显示的函数
+        // 去掉旧版局部覆盖与全局定时器逻辑（由新重启控制统一管理）
+        // 更新错误计数显示的函数(保持兼容，不依赖)
         function updateErrorCountDisplay() {
-            const errorCountElement = errorRestartRow.querySelector('.error-count');
-            if (errorCountElement) {
-                const count = (featureManager && typeof featureManager.wsErrorCount === 'number') ? featureManager.wsErrorCount : 0;
-                errorCountElement.textContent = String(count);
+            const el = document.querySelector('#error-count-display');
+            if (el) {
+                el.textContent = `${featureManager.restart.errorCount || 0}/${featureManager.restart.errorThreshold || 100}`;
             }
         }
-
-        // 保存倒计时元素到全局变量，确保可以被toggleTimedRestart方法访问
-        window.countdownElement = timedRestartRow.querySelector('.countdown-timer');
-        console.log('【倒计时】已保存countdownElement到全局变量');
-
-        // 重写handleWebSocketError方法以更新错误计数显示
-        const originalHandleWebSocketError = featureManager.handleWebSocketError;
-        featureManager.handleWebSocketError = function() {
-            // 确保错误计数属性存在
-            if (typeof this.wsErrorCount === 'undefined') {
-                this.wsErrorCount = 0;
-            }
-
-            const result = originalHandleWebSocketError.apply(this, arguments);
-            updateErrorCountDisplay();
-            return result;
-        };
-
-        // 重写resetWebSocketErrorCount方法以更新错误计数显示
-        const originalResetWebSocketErrorCount = featureManager.resetWebSocketErrorCount;
-        featureManager.resetWebSocketErrorCount = function() {
-            const result = originalResetWebSocketErrorCount.apply(this, arguments);
-            updateErrorCountDisplay();
-            return result;
-        };
-
-        // 如果featureManager没有getRemainingRestartTime方法，添加一个
-        if (!featureManager.getRemainingRestartTime) {
-            // 存储定时重启开始时间
-            let restartStartTime = null;
-            let restartInterval = null;
-
-            // 重写toggleTimedRestart方法以记录开始时间
-            const originalToggleTimedRestart = featureManager.toggleTimedRestart;
-            featureManager.toggleTimedRestart = function(enabled) {
-                console.log('【定时重启】切换状态:', enabled);
-
-                // 从配置中获取间隔时间（毫秒）
-                const intervalMs = (config.features.timedRestart && config.features.timedRestart.interval) || 36000000; // 默认10小时
-
-                // 使用全局window对象存储变量，确保跨作用域可见
-                window.restartStartTime = enabled ? Date.now() : null;
-                window.restartInterval = enabled ? intervalMs : null;
-
-                // 重要：不再创建自己的定时器，依赖全局定时器
-                if (enabled) {
-                    console.log('【定时重启】已启用，间隔(ms):', intervalMs);
-                    console.log('【定时重启】使用全局定时器，不创建新定时器');
-
-                    // 立即更新一次倒计时显示
-                    updateCountdownDisplay();
-                } else {
-                    console.log('【定时重启】已禁用，清除显示');
-                    if (window.countdownElement) {
-                        window.countdownElement.textContent = '00:00';
-                    }
-                }
-
-                // 确保调用原始方法
-                if (originalToggleTimedRestart) {
-                    return originalToggleTimedRestart.apply(this, arguments);
-                }
-                return true;
-            };
-
-            // 添加获取剩余重启时间的方法
-            featureManager.getRemainingRestartTime = function() {
-                // 使用全局变量获取剩余时间
-                if (!window.restartStartTime || !window.restartInterval) {
-                    return 0;
-                }
-                const elapsed = Date.now() - window.restartStartTime;
-                const remaining = window.restartInterval - elapsed;
-                console.log('【定时重启】剩余时间:', Math.floor(remaining / 1000), '秒');
-                return Math.max(0, remaining);
-            };
-        }
-
-        // 确保featureManager的wsErrorCount属性初始化为0
-        if (typeof featureManager.wsErrorCount === 'undefined') {
-            featureManager.wsErrorCount = 0;
-        }
-
-        // 初始化错误计数显示
         updateErrorCountDisplay();
 
-        // 修复：确保只有一个全局定时器在运行
-        // 先清除可能存在的任何定时器
-        if (window.countdownInterval) {
-            clearInterval(window.countdownInterval);
-            window.countdownInterval = null;
-            console.log('【修复】清除现有定时器');
-        }
+        // 旧版重启控制逻辑已移除，统一由重启控制小节管理
 
-        // 启动单个全局定时器用于所有倒计时更新和重启检测
-        window.countdownInterval = setInterval(function() {
-            // 更新倒计时显示
-            updateCountdownDisplay();
-
-            // 检查是否到达重启时间
-            if (window.restartStartTime && window.restartInterval) {
-                const now = Date.now();
-                if (now - window.restartStartTime >= window.restartInterval) {
-                    console.log('【全局定时器】达到重启时间，执行刷新');
-                    // 执行刷新操作
-                    if (featureManager.performRedirect) {
-                        featureManager.performRedirect({ skipCooldown: true, skipCheck: true });
-                    } else {
-                        // 如果没有performRedirect方法，使用默认的location.reload
-                        location.reload();
-                    }
-                    // 重置计时器
-                    window.restartStartTime = now;
-                    // 立即更新倒计时显示，确保显示正确的新时间
-                    updateCountdownDisplay();
-                }
-            }
-        }, 1000);
-        console.log('【修复】启动单个全局定时器，包含重启检测逻辑');
-
-        // 如果定时重启已启用，初始化倒计时显示
-        if (timedRestartEnabled) {
-            updateCountdownDisplay();
-            // 调用toggleTimedRestart方法以确保状态同步
-            if (featureManager.toggleTimedRestart) {
-                // 只传递enabled参数，符合原始方法定义
-                featureManager.toggleTimedRestart(true);
-                console.log('【定时重启】初始化并同步状态');
-            }
-        }
-
-            // URL检测功能暂时禁用以避免语法错误
-        });
 
         // Mod按钮点击事件 - 简化为简单的显示/隐藏
         modButton.onclick = function() {
