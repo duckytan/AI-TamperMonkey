@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Idle Pixel Auto
 // @namespace    http://tampermonkey.net/
-// @version      2.0
+// @version      2.1
 // @description  自动进行Idle Pixel游戏中的各种操作
 // @author       Duckyの復活
 // @match        https://idle-pixel.com/login/play/
@@ -16,6 +16,16 @@
 
 /*
 更新日志：
+v2.1 (2025-10-20)
+1. 新增：系统分区/重启控制重写
+2. 错误重启：累计 WebSocket 错误次数，达到阈值（默认 100）触发跳转流程（非盲跳），支持手动清零计数
+3. 定时重启：支持秒数配置（默认 36000 秒），UI 显示 HH:MM:SS 倒计时，归零即触发跳转流程；支持暂停/重置，刷新后恢复
+4. 刷新网址与检测：默认 URL 预置；“刷新”按钮走统一跳转流程；“检测”按钮并行执行≥6（尽量 8）种可达性检测，显示“成功次数/总次数”
+5. 统一跳转流程：跳转前进行可达性检测，成功率≥60%才跳转；若<60%，每 10 分钟重试检测直至达标；含超时/并发保护与日志
+6. 改进：日志输出统一与防抖/去重处理，避免重复计数与并发跳转
+7. 改进：配置持久化，包含 restart.url、restart.errorEnabled、restart.errorThreshold、restart.errorCount、restart.timerEnabled、restart.timerSeconds、restart.timerRemaining
+8. 修复：修正重启相关逻辑错乱问题，避免与现有自动化功能互相干扰；Tampermonkey 环境下跨域检测采用 GM_xmlhttpRequest
+
 v2.0 (2025-10-19)
 1. 修复全局定时器中调用不存在的refreshUrl方法问题，修正为调用正确的performRedirect方法
 2. 优化重定向机制，确保在WebSocket错误或定时重启时能正确执行重定向功能
@@ -119,7 +129,7 @@ Modals.open_furnace_dialogue()
     'use strict';
 
     // 统一版本号
-    const scriptVersion = '2.0';
+    const scriptVersion = '2.1';
     const featurePrefix = '【IdlePixelAuto】';
 
     // ================ 日志管理 ================
