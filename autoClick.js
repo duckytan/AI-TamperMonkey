@@ -112,16 +112,21 @@ v1.0 (2024-11-11)
 Modals.open_furnace_dialogue()
 
 矿石熔炼指令：
-// 矿石熔炼指令已更新为使用mod菜单中设定的值，默认10个/次
-// websocket.send('SMELT=copper~10');
-// websocket.send('SMELT=iron~10');
-// websocket.send('SMELT=silver~10');
-// websocket.send('SMELT=gold~10');
-// websocket.send('SMELT=promethium~10');
-// websocket.send('SMELT=titanium~10');
-// websocket.send('SMELT=ancient_ore~10');
-// websocket.send('SMELT=dragon_ore~10');
-// websocket.send('SMELT=faradox_ore~10');
+ - 矿石熔炼指令已更新为使用mod菜单中设定的值，默认10个/次
+websocket.send('SMELT=copper~10');
+websocket.send('SMELT=iron~10');
+websocket.send('SMELT=silver~10');
+websocket.send('SMELT=gold~10');
+websocket.send('SMELT=promethium~10');
+websocket.send('SMELT=titanium~10');
+websocket.send('SMELT=ancient_ore~10');
+websocket.send('SMELT=dragon_ore~10');
+websocket.send('SMELT=faradox_ore~10');
+
+打开渔船窗口指令：
+ - 每次只能派出一种渔船，不能同时派出去
+Fishing.clicks_boat('row_boat')
+Fishing.clicks_boat('canoe_boat')
 
 */
 
