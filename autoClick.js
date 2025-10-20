@@ -3628,147 +3628,26 @@ Fishing.clicks_boat('canoe_boat')
         currentSection.appendChild(row);
         });
 
-        // 4. 系统分区
-        const systemSection = createSectionTitle('系统');
-        panel.appendChild(systemSection);
-        const systemContent = systemSection.contentContainer;
 
-        // 重启控制小节
-        featureManager._loadRestartState();
-        const restartState = featureManager.restart;
 
-        // 子标题
-        const restartTitleRow = document.createElement('div');
-        restartTitleRow.className = 'feature-row';
-        restartTitleRow.innerHTML = `<span class="feature-name" style="font-weight: bold;">重启控制</span><div class="feature-description">错误重启、定时重启与刷新检测统一配置</div>`;
-        systemContent.appendChild(restartTitleRow);
 
-        // 刷新网址与检测
-        const restartUrlRow = document.createElement('div');
-        restartUrlRow.className = 'feature-row';
-        restartUrlRow.innerHTML = `
-            <span class="feature-name" title="用于自动刷新或手动刷新时的目标网址">刷新网址</span>
-            <input id="restart-url-input" type="text" class="refresh-url-input" value="${restartState.url || ''}">
-            <button id="restart-refresh-btn" class="check-url-button" style="background:#3b82f6;">刷新</button>
-            <button id="restart-detect-btn" class="check-url-button" style="background:#16a34a;">检测</button>
-            <span id="restart-detect-result" class="url-check-result">--/--</span>
-        `;
-        systemContent.appendChild(restartUrlRow);
 
-        // 错误重启
-        const errorCtrlRow = document.createElement('div');
-        errorCtrlRow.className = 'feature-row';
-        errorCtrlRow.innerHTML = `
-            <input id="error-restart-toggle" type="checkbox" class="feature-checkbox" ${restartState.errorEnabled ? 'checked' : ''}>
-            <span class="feature-name" title="监听WebSocket错误/关闭事件，累计达到阈值后执行跳转流程">错误重启</span>
-            <input id="error-threshold-input" type="number" class="feature-interval" value="${restartState.errorThreshold || 100}" min="1" step="1">
-            <span class="interval-label">次</span>
-            <span id="error-count-display" class="error-count" style="margin-left:auto;">${restartState.errorCount || 0}/${restartState.errorThreshold || 100}</span>
-            <button id="error-reset-btn" class="check-url-button" style="background:#ef4444;">重置计数</button>
-        `;
-        systemContent.appendChild(errorCtrlRow);
 
-        // 定时重启
-        const timerCtrlRow = document.createElement('div');
-        timerCtrlRow.className = 'feature-row';
-        timerCtrlRow.innerHTML = `
-            <input id="timer-restart-toggle" type="checkbox" class="feature-checkbox" ${restartState.timerEnabled ? 'checked' : ''}>
-            <span class="feature-name" title="根据设置的时长倒计时，到时触发跳转流程">定时重启</span>
-            <input id="timer-seconds-input" type="number" class="feature-interval" value="${restartState.timerSeconds || 36000}" min="60" step="60">
-            <span class="interval-label">秒</span>
-            <span id="timer-remaining-display" class="countdown-display" style="margin-left:auto;">${featureManager._formatHHMMSS(restartState.timerRemaining || restartState.timerSeconds || 0)}</span>
-        `;
-        systemContent.appendChild(timerCtrlRow);
 
-        // 事件绑定
-        // URL变更
-        restartUrlRow.querySelector('#restart-url-input').addEventListener('change', (e) => {
-            featureManager._loadRestartState();
-            featureManager.restart.url = e.target.value.trim();
-            featureManager._saveRestartState();
-        });
-        // 刷新（跳转流程）
-        restartUrlRow.querySelector('#restart-refresh-btn').addEventListener('click', () => {
-            featureManager._loadRestartState();
-            const url = featureManager.restart.url;
-            if (!url) { logger.warn('【重启控制】URL不能为空'); return; }
-            featureManager.jumpWithHealthCheck(url);
-        });
-        // 检测
-        restartUrlRow.querySelector('#restart-detect-btn').addEventListener('click', async () => {
-            featureManager._loadRestartState();
-            const url = featureManager.restart.url;
-            if (!url) { logger.warn('【健康检测】URL不能为空'); return; }
-            const resultSpan = document.querySelector('#restart-detect-result');
-            if (resultSpan) resultSpan.textContent = '检测中...';
-            const res = await featureManager.runHealthChecks(url);
-            if (resultSpan) resultSpan.textContent = `${res.success}/${res.total}`;
-        });
 
-        // 错误重启逻辑
-        errorCtrlRow.querySelector('#error-restart-toggle').addEventListener('change', (e) => {
-            featureManager._loadRestartState();
-            featureManager.restart.errorEnabled = !!e.target.checked;
-            featureManager._saveRestartState();
-            // 同步旧开关
-            toggleFeature('errorRestart', featureManager.restart.errorEnabled);
-            // 启用时清零计数可选，不强制
-        });
-        errorCtrlRow.querySelector('#error-threshold-input').addEventListener('change', (e) => {
-            const val = parseInt(e.target.value);
-            featureManager._loadRestartState();
-            if (!isNaN(val) && val > 0) {
-                featureManager.restart.errorThreshold = val;
-                featureManager._saveRestartState();
-            } else {
-                e.target.value = featureManager.restart.errorThreshold || 100;
-            }
-            featureManager._updateRestartUI();
-        });
-        errorCtrlRow.querySelector('#error-reset-btn').addEventListener('click', () => {
-            featureManager.resetWebSocketErrorCount();
-        });
 
-        // 定时重启逻辑
-        const syncTimerButtons = () => featureManager._updateRestartUI();
-        timerCtrlRow.querySelector('#timer-restart-toggle').addEventListener('change', (e) => {
-            featureManager.toggleTimedRestart(!!e.target.checked);
-            syncTimerButtons();
-        });
-        timerCtrlRow.querySelector('#timer-seconds-input').addEventListener('change', (e) => {
-            const v = parseInt(e.target.value);
-            featureManager._loadRestartState();
-            if (!isNaN(v) && v >= 1) {
-                featureManager.restart.timerSeconds = v;
-                if (!featureManager.restart.timerRemaining || featureManager.restart.timerRemaining > v) {
-                    featureManager.restart.timerRemaining = v;
-                }
-                featureManager._saveRestartState();
-            } else {
-                e.target.value = featureManager.restart.timerSeconds || 36000;
-            }
-            featureManager._updateRestartUI();
-        });
+
+
+
+
+
+
+
         
 
-        // 初始化UI显示与定时器
-        featureManager._saveRestartState();
-        featureManager._updateRestartUI();
-        if (restartState.timerEnabled) {
-            featureManager._startRestartTimerLoop();
-        }
 
-        // 去掉旧版局部覆盖与全局定时器逻辑（由新重启控制统一管理）
-        // 更新错误计数显示的函数(保持兼容，不依赖)
-        function updateErrorCountDisplay() {
-            const el = document.querySelector('#error-count-display');
-            if (el) {
-                el.textContent = `${featureManager.restart.errorCount || 0}/${featureManager.restart.errorThreshold || 100}`;
-            }
-        }
-        updateErrorCountDisplay();
 
-        // 旧版重启控制逻辑已移除，统一由重启控制小节管理
+
 
 
         // Mod按钮点击事件 - 简化为简单的显示/隐藏
