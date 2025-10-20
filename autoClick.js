@@ -3650,6 +3650,10 @@ Fishing.clicks_boat('canoe_boat')
 
 
 
+        // 4. 系统分区
+        const systemSection = createSectionTitle('系统');
+        panel.appendChild(systemSection);
+
         // Mod按钮点击事件 - 简化为简单的显示/隐藏
         modButton.onclick = function() {
             if (panel.style.display === 'block' || panel.style.display === '') {
