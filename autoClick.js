@@ -1189,6 +1189,137 @@ Fishing.clicks_boat('canoe_boat')
         }
     };
 
+    // ================ 熔炉兼容模块 ================
+    const IPXFurnace = {
+        _w: function() {
+            try { return typeof unsafeWindow !== 'undefined' ? unsafeWindow : window; } catch(e) { return window; }
+        },
+        type: function() {
+            if (document.querySelector("itembox[data-item='silver_furnace']")) return 'silver_furnace';
+            if (document.querySelector("itembox[data-item='furnace']")) return 'furnace';
+            return 'unknown';
+        },
+        open: function() {
+            try {
+                const w = this._w();
+                if (w && w.Modals && typeof w.Modals.open_furnace_dialogue === 'function') {
+                    w.Modals.open_furnace_dialogue();
+                    logger.info('【熔炉兼容】已调用 Modals.open_furnace_dialogue()');
+                    return true;
+                }
+                logger.debug('【熔炉兼容】Modals.open_furnace_dialogue() 不可用');
+            } catch(e) { logger.warn('【熔炉兼容】打开熔炉对话框失败:', e); }
+            return false;
+        },
+        getCapacity: function() {
+            const el = document.querySelector('#modal-furnace-capacity') || document.querySelector('#modal-furnace-capacty');
+            if (!el) return null;
+            const raw = (el.textContent || el.value || '').toString();
+            const num = parseInt(raw.replace(/[^0-9]/g, ''));
+            return isNaN(num) ? null : num;
+        },
+        queryAny: function(selectors) {
+            if (!Array.isArray(selectors)) return null;
+            for (const s of selectors) { try { const el = document.querySelector(s); if (el) return el; } catch(e) {} }
+            return null;
+        },
+        _getProgressEl: function() {
+            return this.queryAny(['#itembox-progress-bar-silver_furnace', '#itembox-progress-bar-furnace']);
+        },
+        _getLabelEl: function() {
+            return this.queryAny(['#itembox-img-silver_furnace-label', '#itembox-img-furnace-label', '#label-silver_furnace', '#label-furnace']);
+        },
+        progress: function() {
+            try {
+                const bar = this._getProgressEl();
+                if (bar) {
+                    const styleWidth = bar.style && bar.style.width;
+                    if (styleWidth && styleWidth.includes('%')) {
+                        const p = parseInt(styleWidth);
+                        if (!isNaN(p)) return Math.min(100, Math.max(0, p));
+                    }
+                    const ariaNow = bar.getAttribute('aria-valuenow') || (bar.dataset && bar.dataset.valuenow) || bar.getAttribute('data-progress') || '';
+                    const n = parseInt(ariaNow);
+                    if (!isNaN(n)) return Math.min(100, Math.max(0, n));
+                    try {
+                        const w = parseFloat(getComputedStyle(bar).width);
+                        const parent = bar.parentElement || bar;
+                        const tot = parseFloat(getComputedStyle(parent).width) || 0;
+                        if (w && tot) return Math.min(100, Math.max(0, Math.round((w / tot) * 100)));
+                    } catch(e) {}
+                }
+                const label = this._getLabelEl();
+                if (label) {
+                    const txt = (label.textContent || '').trim().toLowerCase();
+                    if (txt.includes('busy') || /\d+:\d{2}:\d{2}/.test(txt)) return 50;
+                }
+            } catch(e) { logger.debug('【熔炉兼容】读取进度失败:', e); }
+            return 0;
+        },
+        isBusy: function() {
+            const p = this.progress();
+            if (p > 0 && p < 100) return true;
+            const label = this._getLabelEl();
+            if (label) {
+                const txt = (label.textContent || '').toLowerCase();
+                if (txt.includes('busy') || /\d+:\d{2}:\d{2}/.test(txt)) return true;
+            }
+            return false;
+        },
+        _mapOreToken: function(ore) {
+            if (!ore) return null;
+            const o = String(ore).trim().toLowerCase();
+            const map = {
+                copper: 'copper',
+                iron: 'iron',
+                silver: 'silver',
+                gold: 'gold',
+                platinum: 'platinum',
+                promethium: 'promethium',
+                titanium: 'titanium',
+                ancient: 'ancient_ore',
+                dragon: 'dragon_ore',
+                faradox: 'faradox_ore',
+                ancient_ore: 'ancient_ore',
+                dragon_ore: 'dragon_ore',
+                faradox_ore: 'faradox_ore'
+            };
+            return map[o] || o;
+        },
+        _send: function(msg) {
+            try {
+                const w = this._w();
+                if (w && w.websocket && typeof w.websocket.send === 'function' && (w.websocket.readyState === 0 || w.websocket.readyState === 1)) {
+                    w.websocket.send(msg);
+                    logger.info(`【熔炉兼容】发送WebSocket: ${msg}`);
+                    return true;
+                }
+            } catch(e) { logger.warn('【熔炉兼容】直接使用window.websocket发送失败:', e); }
+            if (typeof featureManager !== 'undefined' && typeof featureManager.sendWebSocketMessage === 'function') {
+                const ok = featureManager.sendWebSocketMessage(msg);
+                if (ok) return true;
+            }
+            logger.warn('【熔炉兼容】未找到可用的WebSocket连接，跳过发送: ' + msg);
+            return false;
+        },
+        smelt: function(ore, qty) {
+            const token = this._mapOreToken(ore);
+            const n = parseInt(qty);
+            if (!token || isNaN(n) || n <= 0) {
+                logger.warn(`【熔炉兼容】无效的smelt参数 ore=${ore}, qty=${qty}`);
+                return false;
+            }
+            return this._send(`SMELT=${token}~${n}`);
+        },
+        unlock: function(barCode) {
+            const code = String(barCode || '').trim();
+            if (!code) { logger.warn('【熔炉兼容】unlock参数为空'); return false; }
+            return this._send(`UNLOCK_SMELT_BAR=${code}`);
+        }
+    };
+
+    try { (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window).IPXFurnace = IPXFurnace; logger.debug('【熔炉兼容】IPXFurnace 已挂载到全局'); } catch(e) {}
+
     // ================ 功能管理器 ================
     const featureManager = {
         // 执行矿石熔炼
@@ -1271,24 +1402,18 @@ Fishing.clicks_boat('canoe_boat')
             const requirements = oreRefineHelper.calculateRequirements(selectedOre, refineCount);
             logger.info(`【矿石熔炼】尝试熔炼${selectedOre}矿石，数量: ${refineCount}，需要石油: ${requirements.oil}，预计时间: ${requirements.time}秒`);
 
-            // 1. 先查找对应的输入框和按钮
-            const inputElement = document.getElementById(`furnace-smelt-ore-${selectedOre}-value`);
-            if (inputElement) {
-                // 设置输入值为配置的精炼数量
-                inputElement.value = refineCount;
-            }
+            // 通过WebSocket发送SMELT指令（兼容新旧熔炉UI）
+            const ok = (typeof IPXFurnace !== 'undefined' && IPXFurnace && typeof IPXFurnace.smelt === 'function')
+                ? IPXFurnace.smelt(selectedOre, refineCount)
+                : featureManager.sendWebSocketMessage(`SMELT=${selectedOre}~${refineCount}`);
 
-            // 2. 查找GO按钮
-            const button = elementFinders.findSmeltButton();
-            if (button) {
-                const result = utils.safeClick(button);
-                // 只在点击失败时输出日志
-                if (!result) {
-                    logger.warn(`【矿石熔炼】${selectedOre}矿石熔炼按钮点击失败`);
-                }
-                return result;
+            if (ok) {
+                logger.info(`【矿石熔炼】已发送SMELT指令: ${selectedOre} x ${refineCount}`);
+                return true;
+            } else {
+                logger.warn('【矿石熔炼】SMELT指令发送失败，可能WebSocket未连接');
+                return false;
             }
-            return false;
         },
 
         // 执行熔炉激活
