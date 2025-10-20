@@ -3755,7 +3755,11 @@ Fishing.clicks_boat('canoe_boat')
         featureManager._saveRestartState();
         featureManager._updateRestartUI();
         if (restartState.timerEnabled) {
-            featureManager._startRestartTimerLoop();
+            if (!restartState.timerRunning) {
+                featureManager.toggleTimedRestart(true);
+            } else {
+                featureManager._startRestartTimerLoop();
+            }
         }
 
         // 去掉旧版局部覆盖与全局定时器逻辑（由新重启控制统一管理）
