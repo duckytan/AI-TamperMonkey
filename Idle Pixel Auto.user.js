@@ -1715,43 +1715,69 @@ Fishing.clicks_boat('canoe_boat')
                 try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) roots.push(unsafeWindow); } catch (e) {}
                 roots.push(window);
 
-                // 内部发送助手：支持OPEN/CONNECTING状态，CONNECTING时等待open后再发
+                // 内部发送助手：支持OPEN/CONNECTING状态，CONNECTING时等待open后再发；若无readyState但有send则直接尝试
                 const trySend = (sock, fromLabel) => {
                     if (!sock || typeof sock.send !== 'function') return false;
                     try {
                         // 缓存引用，后续快速复用
                         this._lastSocketRef = sock;
-                        const state = typeof sock.readyState === 'number' ? sock.readyState : -1;
-                        if (state === 1) { // OPEN
-                            logger.info(`【WebSocket】通过${fromLabel}发送消息 (OPEN)`);
-                            sock.send(message);
-                            return true;
-                        }
-                        if (state === 0) { // CONNECTING
-                            logger.info(`【WebSocket】连接尚未OPEN，等待open后发送 -> ${fromLabel}`);
-                            const onOpen = () => {
+                        const hasReadyState = typeof sock.readyState === 'number';
+                        if (hasReadyState) {
+                            const state = sock.readyState;
+                            if (state === 1) { // OPEN
+                                logger.info(`【WebSocket】通过${fromLabel}发送消息 (OPEN)`);
+                                sock.send(message);
+                                return true;
+                            }
+                            if (state === 0) { // CONNECTING
+                                logger.info(`【WebSocket】连接尚未OPEN，等待open后发送 -> ${fromLabel}`);
+                                const onOpen = () => {
+                                    try {
+                                        sock.send(message);
+                                        logger.info('【WebSocket】open后已发送消息');
+                                    } catch (err) {
+                                        logger.error('【WebSocket】open后发送失败:', err);
+                                        if (typeof this.handleWebSocketError === 'function') this.handleWebSocketError();
+                                    }
+                                    try { sock.removeEventListener('open', onOpen); } catch (e) {}
+                                };
                                 try {
-                                    sock.send(message);
-                                    logger.info('【WebSocket】open后已发送消息');
-                                } catch (err) {
-                                    logger.error('【WebSocket】open后发送失败:', err);
-                                    if (typeof this.handleWebSocketError === 'function') this.handleWebSocketError();
+                                    sock.addEventListener('open', onOpen);
+                                } catch (e) {
+                                    // 某些自定义socket没有addEventListener，直接尝试发送
+                                    try {
+                                        sock.send(message);
+                                        logger.info(`【WebSocket】自定义socket（无事件）直接发送成功 -> ${fromLabel}`);
+                                        return true;
+                                    } catch (err2) {
+                                        logger.warn('【WebSocket】自定义socket直接发送失败:', err2);
+                                    }
                                 }
-                                try { sock.removeEventListener('open', onOpen); } catch (e) {}
-                            };
-                            try { sock.addEventListener('open', onOpen); } catch (e) {}
-                            // 5 秒后兜底移除监听，避免泄漏
-                            setTimeout(() => { try { sock.removeEventListener('open', onOpen); } catch (e) {} }, 5000);
-                            return true; // 视为已安排发送
+                                // 5 秒后兜底移除监听，避免泄漏
+                                setTimeout(() => { try { sock.removeEventListener('open', onOpen); } catch (e) {} }, 5000);
+                                return true; // 视为已安排发送
+                            }
+                            logger.warn(`【WebSocket】socket非OPEN/CONNECTING状态: ${state}`);
+                            return false;
+                        } else {
+                            // 无readyState的自定义socket（例如框架封装），直接尝试发送
+                            try {
+                                sock.send(message);
+                                logger.info(`【WebSocket】通过${fromLabel}发送消息（无readyState，自定义socket）`);
+                                return true;
+                            } catch (err) {
+                                logger.error('【WebSocket】自定义socket发送失败:', err);
+                                if (typeof this.handleWebSocketError === 'function') this.handleWebSocketError();
+                                return false;
+                            }
                         }
-                        logger.warn(`【WebSocket】socket非OPEN/CONNECTING状态: ${state}`);
-                        return false;
                     } catch (e) {
                         logger.error('【WebSocket】发送失败:', e);
                         if (typeof this.handleWebSocketError === 'function') this.handleWebSocketError();
                         return false;
                     }
                 };
+
 
                 // 候选变量名
                 const allPossibleSocketNames = [
