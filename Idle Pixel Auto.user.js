@@ -882,45 +882,65 @@ Fishing.clicks_boat('canoe_boat')
             return null;
         },
 
-        // 获取指定类型矿石的数量
+        // 获取指定类型矿石的数量（兼容新旧DOM结构）
         getOreCount: function(oreType) {
             try {
-                // 矿石类型映射表
-                const oreTypeMap = {
-                    copper: 'copper_ore',
-                    iron: 'iron_ore',
-                    silver: 'silver_ore',
-                    gold: 'gold_ore',
-                    platinum: 'platinum_ore'
+                const parseCountFromEl = (el) => {
+                    if (!el) return NaN;
+                    const raw = (el.textContent || el.value || '').toString().replace(/,/g, '').trim();
+                    const n = parseInt(raw);
+                    return isNaN(n) ? NaN : n;
                 };
 
-                const oreKey = oreTypeMap[oreType] || oreType;
-                logger.debug(`【元素查找】正在查找矿石元素: item-display[data-key="${oreKey}"]`);
-                const oreElement = document.querySelector(`item-display[data-key="${oreKey}"]`);
+                // 兼容多种键名：新结构直接用 ore 名称；旧结构带 _ore 后缀
+                // 同时为安全起见保留原 oreType 自身与 `${oreType}_ore` 两种尝试
+                const aliasMap = {
+                    copper: ['copper', 'copper_ore'],
+                    iron: ['iron', 'iron_ore'],
+                    silver: ['silver', 'silver_ore'],
+                    gold: ['gold', 'gold_ore'],
+                    platinum: ['platinum', 'platinum_ore'],
+                    stone: ['stone']
+                };
+                const keys = aliasMap[oreType] || [oreType, `${oreType}_ore`];
 
-                if (oreElement) {
-                    logger.debug(`【元素查找】找到${oreType}矿石元素，文本内容: "${oreElement.textContent}"`);
-                    // 移除逗号等格式字符，转换为数字
-                    const oreCount = parseInt(oreElement.textContent.replace(/,/g, ''));
-                    if (!isNaN(oreCount)) {
-                        logger.debug(`【元素查找】成功获取${oreType}矿石数量: ${oreCount}`);
-                        return oreCount;
-                    } else {
-                        logger.warn(`【元素查找】无法解析${oreType}矿石数量，原始文本: "${oreElement.textContent}"`);
-                    }
-                } else {
-                    // 尝试其他可能的选择器
-                    logger.debug(`【元素查找】未找到${oreType}矿石元素，尝试备用选择器`);
-                    const backupElement = document.querySelector(`[data-key="${oreKey}"]`);
-                    if (backupElement) {
-                        logger.debug(`【元素查找】通过备用选择器找到${oreType}矿石元素，文本内容: "${backupElement.textContent}"`);
-                        const oreCount = parseInt(backupElement.textContent.replace(/,/g, ''));
-                        if (!isNaN(oreCount)) {
-                            logger.debug(`【元素查找】通过备用选择器成功获取${oreType}矿石数量: ${oreCount}`);
-                            return oreCount;
+                // 1) 优先使用新结构：item-display[data-key="<key>"]
+                for (const key of keys) {
+                    const el = document.querySelector(`item-display[data-key="${key}"]`);
+                    if (el) {
+                        const n = parseCountFromEl(el);
+                        if (!isNaN(n)) {
+                            logger.debug(`【元素查找】通过 item-display[data-key="${key}"] 获取 ${oreType} 数量: ${n}`);
+                            return n;
+                        } else {
+                            logger.debug(`【元素查找】item-display[data-key="${key}"] 文本无法解析为数字: "${el.textContent}"`);
                         }
                     }
                 }
+
+                // 2) 退化为任意 [data-key="<key>"]（部分页面用法不含自定义标签）
+                for (const key of keys) {
+                    const el = document.querySelector(`[data-key="${key}"]`);
+                    if (el) {
+                        const n = parseCountFromEl(el);
+                        if (!isNaN(n)) {
+                            logger.debug(`【元素查找】通过 [data-key="${key}"] 获取 ${oreType} 数量: ${n}`);
+                            return n;
+                        }
+                    }
+                }
+
+                // 3) 再次回退：从 itembox[data-item="<ore>"] 容器内部提取
+                const box = document.querySelector(`itembox[data-item="${oreType}"]`) || document.querySelector(`itembox[data-item="${keys[0]}"]`);
+                if (box) {
+                    const inner = box.querySelector('item-display') || box.querySelector('[data-key]');
+                    const n = parseCountFromEl(inner);
+                    if (!isNaN(n)) {
+                        logger.debug(`【元素查找】通过 itembox[data-item="${box.getAttribute('data-item')}"] 内部获取 ${oreType} 数量: ${n}`);
+                        return n;
+                    }
+                }
+
                 logger.debug(`【元素查找】未找到${oreType}矿石数量元素`);
             } catch (e) {
                 logger.error(`【元素查找】获取${oreType}矿石数量时出错:`, e);
@@ -1312,77 +1332,59 @@ Fishing.clicks_boat('canoe_boat')
     const featureManager = {
         // 执行矿石熔炼
         executeCopperSmelt: function() {
-            // 检查WebSocket连接状态
+            // 1) 检查WebSocket连接状态
             if (!utils.checkWebSocketConnection()) {
                 logger.warn('【矿石熔炼】WebSocket连接异常，跳过操作');
                 return false;
             }
 
+            // 2) 熔炉忙碌检测（避免并发发送导致失败）
+            try {
+                if (typeof IPXFurnace !== 'undefined' && IPXFurnace && typeof IPXFurnace.isBusy === 'function') {
+                    if (IPXFurnace.isBusy()) {
+                        logger.debug('【矿石熔炼】熔炉正在忙碌，跳过本次熔炼');
+                        return false;
+                    }
+                }
+            } catch (e) { /* ignore busy check error */ }
+
             let selectedOre = config.features.copperSmelt.selectedOre || 'copper';
             const refineCount = config.features.copperSmelt.refineCount || 10;
             const isRandomEnabled = config.features.copperSmelt.randomEnabled || false;
+            const availableOres = ['copper', 'iron', 'silver', 'gold', 'platinum'];
 
-            // 如果启用了随机选择矿石
+            const pickRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
+            const eligible = (ore) => oreRefineHelper.checkResourcesSufficient(ore, refineCount);
+
             if (isRandomEnabled) {
-                const availableOres = ['copper', 'iron', 'silver', 'gold', 'platinum'];
-                const shuffledOres = [...availableOres].sort(() => Math.random() - 0.5);
-
-                // 尝试找到一种有足够资源的矿石
-                let foundSuitableOre = false;
-                for (const ore of shuffledOres) {
-                    if (oreRefineHelper.checkResourcesSufficient(ore, refineCount)) {
-                        selectedOre = ore;
-                        foundSuitableOre = true;
-                        // 更新配置中的选中矿石，以便UI同步
-                        config.features.copperSmelt.selectedOre = selectedOre;
-                        config.save();
-                        logger.info(`【矿石熔炼】随机选择了${selectedOre}矿石进行熔炼`);
-                        break;
-                    }
-                }
-
-                if (!foundSuitableOre) {
-                    // 获取当前选中矿石的详细信息
-                    const currentOre = elementFinders.getOreCount(selectedOre);
+                // 随机模式：从“可熔炼候选集”中随机挑选，避免顺序偏差
+                const candidates = availableOres.filter(eligible);
+                if (candidates.length === 0) {
                     const currentOil = oreRefineHelper.getCurrentOil();
-                    const required = oreRefineHelper.calculateRequirements(selectedOre, refineCount);
-                    
-                    logger.info(`【矿石熔炼】没有找到足够资源的矿石，跳过熔炼。当前矿石: ${selectedOre}=${currentOre}, 需求矿石: ${refineCount}, 当前石油: ${currentOil}, 需求石油: ${required.oil}`);
+                    logger.info(`【矿石熔炼】随机模式下无可用矿石（石油=${currentOil}，每种矿石库存均不足或油量不足），跳过本次`);
                     return false;
                 }
+                selectedOre = pickRandom(candidates);
+                // 同步到配置，保持UI一致
+                config.features.copperSmelt.selectedOre = selectedOre;
+                config.save();
+                logger.info(`【矿石熔炼】随机选择矿石: ${selectedOre}`);
             } else {
-                // 检查资源是否足够
-                if (!oreRefineHelper.checkResourcesSufficient(selectedOre, refineCount)) {
-                    logger.info(`【矿石熔炼】${selectedOre}矿石资源不足，尝试随机选择其他矿石`);
-                    
-                    // 当检测到没有足够的矿石熔炼时，自动随机再选另外一种矿石来熔炼
-                    const availableOres = ['copper', 'iron', 'silver', 'gold', 'platinum'];
-                    const shuffledOres = [...availableOres].sort(() => Math.random() - 0.5);
-                    
-                    // 尝试找到一种有足够资源的矿石
-                    let foundSuitableOre = false;
-                    for (const ore of shuffledOres) {
-                        // 跳过当前已选但资源不足的矿石
-                        if (ore === selectedOre) continue;
-                        
-                        if (oreRefineHelper.checkResourcesSufficient(ore, refineCount)) {
-                            selectedOre = ore;
-                            foundSuitableOre = true;
-                            logger.info(`【矿石熔炼】随机选择了${selectedOre}矿石进行熔炼`);
-                            break;
-                        }
-                    }
-                    
-                    // 如果没有找到合适的矿石，跳过熔炼
-                    if (!foundSuitableOre) {
-                        // 获取当前选中矿石的详细信息
+                // 固定模式：若当前选择不足，则在其他矿石中“随机”找一个可用的
+                if (!eligible(selectedOre)) {
+                    const candidates = availableOres.filter(o => o !== selectedOre && eligible(o));
+                    if (candidates.length === 0) {
                         const currentOre = elementFinders.getOreCount(selectedOre);
                         const currentOil = oreRefineHelper.getCurrentOil();
                         const required = oreRefineHelper.calculateRequirements(selectedOre, refineCount);
-                        
-                        logger.info(`【矿石熔炼】没有找到足够资源的矿石，跳过熔炼。当前矿石: ${selectedOre}=${currentOre}, 需求矿石: ${refineCount}, 当前石油: ${currentOil}, 需求石油: ${required.oil}`);
+                        logger.info(`【矿石熔炼】${selectedOre}资源不足且无其他可用矿石，跳过。矿石: ${currentOre}/${refineCount}，石油: ${currentOil}/${required.oil}`);
                         return false;
                     }
+                    selectedOre = pickRandom(candidates);
+                    // 同步到配置，保持UI一致
+                    config.features.copperSmelt.selectedOre = selectedOre;
+                    config.save();
+                    logger.info(`【矿石熔炼】切换到可用矿石: ${selectedOre}`);
                 }
             }
 
