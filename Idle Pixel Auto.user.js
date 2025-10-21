@@ -1234,11 +1234,28 @@ Fishing.clicks_boat('canoe_boat')
         _getProgressEl: function() {
             return this.queryAny(['#itembox-progress-bar-silver_furnace', '#itembox-progress-bar-furnace']);
         },
+        _getProgressWrapEl: function() {
+            return this.queryAny(['#itembox-img-silver_furnace-progress-bar', '#itembox-img-furnace-progress-bar']);
+        },
         _getLabelEl: function() {
             return this.queryAny(['#itembox-img-silver_furnace-label', '#itembox-img-furnace-label', '#label-silver_furnace', '#label-furnace']);
         },
         progress: function() {
             try {
+                const labelEl = this._getLabelEl();
+                if (labelEl) {
+                    const t = (labelEl.textContent || '').trim().toLowerCase();
+                    if (t.includes('idle')) return 0;
+                }
+                const wrap = this._getProgressWrapEl && this._getProgressWrapEl();
+                if (wrap) {
+                    try {
+                        const cs = getComputedStyle(wrap);
+                        if (cs && (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0')) {
+                            return 0;
+                        }
+                    } catch(e) {}
+                }
                 const bar = this._getProgressEl();
                 if (bar) {
                     const styleWidth = bar.style && bar.style.width;
@@ -1256,7 +1273,7 @@ Fishing.clicks_boat('canoe_boat')
                         if (w && tot) return Math.min(100, Math.max(0, Math.round((w / tot) * 100)));
                     } catch(e) {}
                 }
-                const label = this._getLabelEl();
+                const label = labelEl || this._getLabelEl();
                 if (label) {
                     const txt = (label.textContent || '').trim().toLowerCase();
                     if (txt.includes('busy') || /\d+:\d{2}:\d{2}/.test(txt)) return 50;
@@ -1265,13 +1282,23 @@ Fishing.clicks_boat('canoe_boat')
             return 0;
         },
         isBusy: function() {
-            const p = this.progress();
-            if (p > 0 && p < 100) return true;
             const label = this._getLabelEl();
             if (label) {
-                const txt = (label.textContent || '').toLowerCase();
+                const txt = (label.textContent || '').trim().toLowerCase();
+                if (txt.includes('idle')) return false;
                 if (txt.includes('busy') || /\d+:\d{2}:\d{2}/.test(txt)) return true;
             }
+            const wrap = this._getProgressWrapEl && this._getProgressWrapEl();
+            if (wrap) {
+                try {
+                    const cs = getComputedStyle(wrap);
+                    if (cs && (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0')) {
+                        return false;
+                    }
+                } catch(e) {}
+            }
+            const p = this.progress();
+            if (p > 0 && p < 100) return true;
             return false;
         },
         _mapOreToken: function(ore) {
