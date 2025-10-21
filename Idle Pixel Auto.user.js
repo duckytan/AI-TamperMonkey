@@ -235,7 +235,8 @@ Fishing.clicks_boat('canoe_boat')
             boatManagement: {
                 enabled: true,
                 interval: 30000, // 默认30秒
-                name: '渔船管理'
+                name: '渔船管理',
+                selectedBoat: 'row_boat'
             },
             woodcutting: {
                 enabled: true,
@@ -296,6 +297,9 @@ Fishing.clicks_boat('canoe_boat')
                 case 'mode':
                     // 树木管理模式必须是有效值
                     return ['single', 'all'].includes(value);
+                case 'selectedBoat':
+                    // 渔船类型必须是有效值
+                    return ['row_boat', 'canoe_boat'].includes(value);
                 default:
                     return true; // 其他配置项不做验证
             }
@@ -323,7 +327,8 @@ Fishing.clicks_boat('canoe_boat')
                 boatManagement: {
                     enabled: true,
                     interval: 30000,
-                    name: '渔船管理'
+                    name: '渔船管理',
+                    selectedBoat: 'row_boat'
                 },
                 woodcutting: {
                     enabled: true,
@@ -436,7 +441,8 @@ Fishing.clicks_boat('canoe_boat')
                 boatManagement: {
                     enabled: true,
                     interval: 30000,
-                    name: '渔船管理'
+                    name: '渔船管理',
+                    selectedBoat: 'row_boat'
                 },
                 woodcutting: {
                     enabled: true,
@@ -940,14 +946,15 @@ Fishing.clicks_boat('canoe_boat')
         },
 
         // 查找渔船状态标签
-        findBoatStatusLabel: function() {
+        findBoatStatusLabel: function(boatType) {
             try {
-                const labelElement = document.getElementById('label-row_boat');
+                const type = boatType || (config.features.boatManagement && config.features.boatManagement.selectedBoat) || 'row_boat';
+                const labelElement = document.getElementById('label-' + type);
                 if (labelElement) {
-                    logger.debug('【元素查找】成功找到渔船状态标签');
+                    logger.debug('【元素查找】成功找到渔船状态标签: ' + type);
                     return labelElement;
                 } else {
-                    logger.debug('【元素查找】未找到渔船状态标签');
+                    logger.debug('【元素查找】未找到渔船状态标签: ' + type);
                 }
             } catch (e) {
                 logger.error('【元素查找】查找渔船状态标签时出错:', e);
@@ -1497,11 +1504,11 @@ Fishing.clicks_boat('canoe_boat')
         },
 
         // 检测渔船状态
-        checkBoatStatus: function() {
+        checkBoatStatus: function(boatType) {
             try {
                 logger.debug('【渔船管理】开始检测渔船状态');
 
-                const statusLabel = elementFinders.findBoatStatusLabel();
+                const statusLabel = elementFinders.findBoatStatusLabel(boatType);
                 if (!statusLabel) {
                     logger.warn('【渔船管理】未找到渔船状态标签');
                     return 'unknown';
@@ -1879,9 +1886,31 @@ Fishing.clicks_boat('canoe_boat')
             try {
                 logger.debug('【渔船管理】开始执行渔船管理功能');
 
+                const selectedBoat = (config.features.boatManagement && config.features.boatManagement.selectedBoat) || 'row_boat';
+
                 // 检查渔船状态
-                const status = this.checkBoatStatus();
+                const status = this.checkBoatStatus(selectedBoat);
                 logger.debug('【渔船管理】当前渔船状态:', status);
+
+                const openBoatDialog = () => {
+                    try {
+                        if (typeof Fishing !== 'undefined' && typeof Fishing.clicks_boat === 'function') {
+                            Fishing.clicks_boat(selectedBoat);
+                            logger.info(`【渔船管理】调用Fishing.clicks_boat('${selectedBoat}')`);
+                            return true;
+                        }
+                    } catch (e) { /* ignore */ }
+                    const labelSelector = '#label-' + selectedBoat;
+                    const el = document.querySelector(labelSelector);
+                    if (el) {
+                        utils.safeClick(el);
+                        logger.info(`【渔船管理】点击${labelSelector}`);
+                        return true;
+                    } else {
+                        logger.warn(`【渔船管理】未找到${labelSelector}`);
+                        return false;
+                    }
+                };
 
                 switch (status) {
                     case 'sailing':
@@ -1890,13 +1919,9 @@ Fishing.clicks_boat('canoe_boat')
                         break;
 
                     case 'collectable':
-                        // 可收集状态，点击id="label-row_boat"的Collect按钮
+                        // 可收集状态
                         logger.info('【渔船管理】开始收集渔获');
-                        const collectRowButton = document.querySelector('#label-row_boat');
-                        if (collectRowButton) {
-                            utils.safeClick(collectRowButton);
-                            logger.info('【渔船管理】点击#label-row_boat（Collect状态）');
-
+                        if (openBoatDialog()) {
                             // 等待打开收集窗口
                             setTimeout(() => {
                                 const collectLootButton = elementFinders.findCollectLootButton();
@@ -1911,13 +1936,9 @@ Fishing.clicks_boat('canoe_boat')
                         break;
 
                     case 'idle':
-                        // 闲置状态，点击id="label-row_boat"的Idle按钮
+                        // 闲置状态
                         logger.info('【渔船管理】开始发送渔船出海');
-                        const idleRowButton = document.querySelector('#label-row_boat');
-                        if (idleRowButton) {
-                            utils.safeClick(idleRowButton);
-                            logger.info('【渔船管理】点击#label-row_boat（Idle状态）');
-
+                        if (openBoatDialog()) {
                             // 等待打开出海窗口
                             setTimeout(() => {
                                 const sendButton = elementFinders.findSendBoatButton();
@@ -2965,7 +2986,7 @@ Fishing.clicks_boat('canoe_boat')
             }
 
             /* 特定下拉菜单样式优化 */
-            .ore-select, .wood-mode-select, .combat-area-select {
+            .ore-select, .wood-mode-select, .combat-area-select, .boat-type-select {
                 padding: 6px 10px;
                 border: 1px solid #ddd;
                 border-radius: 4px;
@@ -2978,12 +2999,12 @@ Fishing.clicks_boat('canoe_boat')
                 min-width: 100px;
             }
 
-            .ore-select:focus, .wood-mode-select:focus, .combat-area-select:focus {
+            .ore-select:focus, .wood-mode-select:focus, .combat-area-select:focus, .boat-type-select:focus {
                 border-color: #4CAF50;
                 box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
             }
 
-            .ore-select:hover, .wood-mode-select:hover, .combat-area-select:hover {
+            .ore-select:hover, .wood-mode-select:hover, .combat-area-select:hover, .boat-type-select:hover {
                 border-color: #4CAF50;
             }
 
@@ -3459,12 +3480,17 @@ Fishing.clicks_boat('canoe_boat')
         boatRow.className = 'feature-row';
         const boatEnabled = config.features.boatManagement && config.features.boatManagement.enabled;
         const boatInterval = (config.features.boatManagement && config.features.boatManagement.interval || 30000) / 1000;
+        const boatSelectedBoat = (config.features.boatManagement && config.features.boatManagement.selectedBoat) || 'row_boat';
 
         boatRow.innerHTML = `
             <input type="checkbox" class="feature-checkbox" data-feature="boatManagement" ${boatEnabled ? 'checked' : ''}>
             <span class="feature-name" title="自动管理渔船，收集海洋资源" data-bs-toggle="tooltip" data-bs-placement="right">渔船管理</span>
             <input type="number" class="feature-interval" value="${boatInterval}" min="5" step="5">
             <span class="interval-label">秒/次</span>
+            <select class="boat-type-select">
+                <option value="row_boat" ${boatSelectedBoat === 'row_boat' ? 'selected' : ''}>划艇（3小时）</option>
+                <option value="canoe_boat" ${boatSelectedBoat === 'canoe_boat' ? 'selected' : ''}>独木舟（6小时）</option>
+            </select>
         `;
 
         farmingContent.appendChild(boatRow);
@@ -3472,7 +3498,7 @@ Fishing.clicks_boat('canoe_boat')
         // 绑定事件
         boatRow.querySelector('input[data-feature="boatManagement"]').addEventListener('change', function(e) {
             if (!config.features.boatManagement) {
-                config.features.boatManagement = { enabled: false, interval: 30000, name: '渔船管理' };
+                config.features.boatManagement = { enabled: false, interval: 30000, name: '渔船管理', selectedBoat: 'row_boat' };
             }
             toggleFeature('boatManagement', e.target.checked);
             // 功能状态变化后调整面板大小
@@ -3481,7 +3507,7 @@ Fishing.clicks_boat('canoe_boat')
 
         boatRow.querySelector('.feature-interval').addEventListener('change', function(e) {
             if (!config.features.boatManagement) {
-                config.features.boatManagement = { enabled: false, interval: 30000, name: '渔船管理' };
+                config.features.boatManagement = { enabled: false, interval: 30000, name: '渔船管理', selectedBoat: 'row_boat' };
             }
             // 这里直接传入毫秒值，因为updateFeatureInterval会直接使用
             const value = parseInt(e.target.value);
@@ -3489,6 +3515,19 @@ Fishing.clicks_boat('canoe_boat')
                 updateFeatureInterval('boatManagement', value * 1000);
             } else {
                 e.target.value = boatInterval;
+            }
+        });
+
+        // 渔船类型下拉
+        boatRow.querySelector('.boat-type-select').addEventListener('change', function(e) {
+            if (!config.features.boatManagement) {
+                config.features.boatManagement = { enabled: false, interval: 30000, name: '渔船管理', selectedBoat: 'row_boat' };
+            }
+            const val = e.target.value;
+            if (['row_boat','canoe_boat'].includes(val)) {
+                config.features.boatManagement.selectedBoat = val;
+                config.save();
+                logger.info(`【渔船管理】已选择${val === 'row_boat' ? '划艇（3小时）' : '独木舟（6小时）'}`);
             }
         });
 
