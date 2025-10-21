@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Idle Pixel Auto
 // @namespace    http://tampermonkey.net/
-// @version      2.1
+// @version      2.2
 // @description  自动进行Idle Pixel游戏中的各种操作
 // @author       Duckyの復活
 // @match        https://idle-pixel.com/login/play/
@@ -16,6 +16,12 @@
 
 /*
 更新日志：
+v2.2 (2025-10-21)
+1. 修复：刷新页面后，已勾选的 Mod 功能自动生效，无需手工再次勾选
+2. 修复：熔炼矿石启用“随机”时，下拉菜单会跟随显示当前随机到的矿石
+3. 完善：检查并补齐设置持久化，修复调试日志显示开关不保存的问题
+4. 其他：小幅优化启动与安全检查逻辑
+
 v2.1 (2025-10-20)
 1. 新增：系统分区/重启控制重写
 2. 错误重启：累计 WebSocket 错误次数，达到阈值（默认 100）触发跳转流程（非盲跳），支持手动清零计数
@@ -134,7 +140,7 @@ Fishing.clicks_boat('canoe_boat')
     'use strict';
 
     // 统一版本号
-    const scriptVersion = '2.1';
+    const scriptVersion = '2.2';
     const featurePrefix = '【IdlePixelAuto】';
 
     // ================ 日志管理 ================
@@ -351,10 +357,16 @@ Fishing.clicks_boat('canoe_boat')
         // 保存配置到本地存储
         save: function() {
             try {
-                // 保存全局设置和功能设置
+                // 保存全局设置、功能设置和调试设置
                 const completeConfig = {
                     globalSettings: this.globalSettings,
-                    features: this.features
+                    features: this.features,
+                    debugSettings: this.debugSettings || {
+                        showDebug: true,
+                        showInfo: true,
+                        showWarn: true,
+                        showError: true
+                    }
                 };
                 localStorage.setItem('idlePixelAutoConfig', JSON.stringify(completeConfig));
             } catch (e) {
@@ -372,6 +384,15 @@ Fishing.clicks_boat('canoe_boat')
                         // 日志级别说明：0=DEBUG, 1=INFO, 2=WARN, 3=ERROR
                     };
                 }
+                // 确保debugSettings对象存在
+                if (!this.debugSettings) {
+                    this.debugSettings = {
+                        showDebug: true,
+                        showInfo: true,
+                        showWarn: true,
+                        showError: true
+                    };
+                }
 
                 const saved = localStorage.getItem('idlePixelAutoConfig');
                 if (saved) {
@@ -382,6 +403,13 @@ Fishing.clicks_boat('canoe_boat')
                         this.globalSettings = {
                             ...this.globalSettings,
                             ...parsed.globalSettings
+                        };
+                    }
+                    // 加载调试设置
+                    if (parsed && typeof parsed.debugSettings === 'object') {
+                        this.debugSettings = {
+                            ...this.debugSettings,
+                            ...parsed.debugSettings
                         };
                     }
 
@@ -1395,6 +1423,14 @@ Fishing.clicks_boat('canoe_boat')
                 // 同步到配置，保持UI一致
                 config.features.copperSmelt.selectedOre = selectedOre;
                 config.save();
+                // 同步下拉菜单的显示值
+                try {
+                    const oreSelectEl = document.querySelector('#auto-copper-smelt-panel .ore-select[data-feature="selectedOre"]');
+                    if (oreSelectEl) {
+                        oreSelectEl.value = selectedOre;
+                        Array.from(oreSelectEl.options).forEach(opt => opt.selected = (opt.value === selectedOre));
+                    }
+                } catch (e) { /* 忽略UI同步异常 */ }
                 logger.info(`【矿石熔炼】随机选择矿石: ${selectedOre}`);
             } else {
                 // 固定模式：若当前选择不足，则在其他矿石中“随机”找一个可用的
@@ -1411,6 +1447,14 @@ Fishing.clicks_boat('canoe_boat')
                     // 同步到配置，保持UI一致
                     config.features.copperSmelt.selectedOre = selectedOre;
                     config.save();
+                    // 同步下拉菜单的显示值
+                    try {
+                        const oreSelectEl = document.querySelector('#auto-copper-smelt-panel .ore-select[data-feature="selectedOre"]');
+                        if (oreSelectEl) {
+                            oreSelectEl.value = selectedOre;
+                            Array.from(oreSelectEl.options).forEach(opt => opt.selected = (opt.value === selectedOre));
+                        }
+                    } catch (e) { /* 忽略UI同步异常 */ }
                     logger.info(`【矿石熔炼】切换到可用矿石: ${selectedOre}`);
                 }
             }
@@ -4167,6 +4211,23 @@ Fishing.clicks_boat('canoe_boat')
         logger.info('【调试系统】调试区域已初始化');
     }
 
+    // 启动：在页面载入后立即根据配置启动已勾选功能，避免需要手动再次勾选
+    function startEnabledFeaturesImmediately() {
+        try {
+            const features = config.features || {};
+            Object.keys(features).forEach(featureKey => {
+                const feature = features[featureKey];
+                if (!feature || !feature.enabled) return;
+                if (!timers[featureKey]) {
+                    const interval = feature.interval || 1000;
+                    featureManager.startTimedFeature(featureKey, interval);
+                }
+            });
+        } catch (e) {
+            logger.error('【初始化】应用已启用功能失败:', e);
+        }
+    }
+
     // ================ 初始化与主流程 ================
     // 初始化脚本
     function init() {
@@ -4194,7 +4255,10 @@ Fishing.clicks_boat('canoe_boat')
         createStyles();
         createUI();
 
-        // 移除了单独的功能启动代码，统一由安全检查定时器管理功能的启动和监控
+        // 加载后立即应用已勾选的功能，避免需要手动再勾选
+        startEnabledFeaturesImmediately();
+
+        // 仍保留统一安全检查定时器管理功能的启动和监控
 
         // 设置MutationObserver来监控DOM变化，并添加防抖处理
         let lastLogTime = 0;
@@ -4443,15 +4507,11 @@ Fishing.clicks_boat('canoe_boat')
 
                 // 只在功能确实启用且用户没有禁用的情况下启动
                 if (feature.enabled && !timers[featureName]) {
-                    // 对于矿石熔炼功能，额外检查按钮是否存在
-                    const shouldStart = featureName !== 'copperSmelt' || elementFinders.findSmeltButton();
-
-                    if (shouldStart) {
-                        logger.info(`${featurePrefix}安全检查：功能已启用且未运行，启动功能`);
-                        // 确保使用配置中保存的间隔值，并且添加额外的验证
-                        const interval = feature.interval || 1000;
-                        featureManager.startTimedFeature(featureName, interval);
-                    }
+                    // 放宽条件：所有功能均可直接启动（矿石熔炼无需依赖UI按钮）
+                    logger.info(`${featurePrefix}安全检查：功能已启用且未运行，启动功能`);
+                    // 确保使用配置中保存的间隔值，并且添加额外的验证
+                    const interval = feature.interval || 1000;
+                    featureManager.startTimedFeature(featureName, interval);
                 } else if (!feature.enabled && timers[featureName]) {
                     // 如果功能已禁用但定时器仍在运行，停止它
                     logger.info(`${featurePrefix}安全检查：功能已禁用但定时器仍在运行，停止功能`);
