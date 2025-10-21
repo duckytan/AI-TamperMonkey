@@ -203,7 +203,7 @@
   - 熔炼：`findSmeltButton()` → 按矿石类型匹配 onclick 中 `SMELT=...` 或模态内文本 'GO'。
   - 熔炉 itembox：`findFurnaceItembox()` → [data-item="bronze_furnace"] 及关键词包含。
   - 石油：`findOilValues()` → `item-display[data-key="oil"]` / `item-display[data-key="max_oil"]`。
-  - 矿石数量：`getOreCount(ore)` → `item-display[data-key="<ore>_ore"]`。
+  - 矿石数量：`getOreCount(ore)` → 优先 `item-display[data-key="<ore>"]`，兼容 `[data-key="<ore>_ore"]` 与 `itembox[data-item="<ore>"]` 内部解析。
   - 渔船：`findBoatItembox()`、`findBoatStatusLabel()`（id="label-row_boat"）、`findCollectLootButton()`、`findSendBoatButton()`。
   - 战斗：`findEnergyValue()`、`findFightPointsValue()`、`findQuickFightButton(area)`（id 前缀 `game-panel-combat-select-area-panels-quickfight-`）。
   - 挖矿机：`findMiningMachineButtons()`（左右箭头与 on 计数）。
