@@ -2565,7 +2565,7 @@ Fishing.clicks_boat('canoe_boat')
     }
 
     // 切换功能状态
-    function toggleFeature(featureKey, enabled) {
+    function toggleFeature(featureKey, enabled, options = {}) {
         const featurePrefix = featureKey === 'copperSmelt' ? '【矿石熔炼】' :
                              featureKey === 'oilManagement' ? '【石油管理】' :
                              featureKey === 'boatManagement' ? '【渔船管理】' :
@@ -2575,46 +2575,60 @@ Fishing.clicks_boat('canoe_boat')
                              featureKey === 'errorRestart' ? '【错误重启】' :
                              featureKey === 'timedRestart' ? '【定时重启】' : '';
         const featureName = config.features[featureKey]?.name || featureKey;
+        const feature = config.features[featureKey];
 
         logger.info(`${featurePrefix}${featureName}: ${enabled ? '已启用' : '已禁用'}`);
 
-        const feature = config.features[featureKey];
-        if (feature) {
-            // 先更新配置
-            feature.enabled = enabled;
+        if (!feature) {
+            logger.warn(`${featurePrefix}未找到功能配置，跳过处理`);
+            return;
+        }
+
+        const skipSave = !!options.skipSave;
+        const skipIfRunning = !!options.skipIfRunning;
+        const sourceLabel = options.source ? String(options.source) : '';
+
+        feature.enabled = enabled;
+
+        if (skipSave) {
+            const context = sourceLabel ? `（来源: ${sourceLabel}）` : '';
+            logger.debug(`${featurePrefix}跳过保存配置${context}`);
+        } else {
             config.save();
             logger.debug(`${featurePrefix}配置已保存`);
+        }
 
-            // 根据状态启用或禁用功能
-            if (enabled) {
-                // 特殊处理不同类型的功能
-                if (featureKey === 'activateFurnace') {
-                    // 对于激活熔炉功能，仍然直接执行，因为它不是定时任务
-                    activateFurnaceAndStartSmelting();
-                } else if (featureKey === 'errorRestart') {
-                    // 错误重启功能特殊处理
-                    logger.debug(`${featurePrefix}功能已启用，重置错误计数`);
-                    featureManager.resetWebSocketErrorCount();
-                    // 确保WebSocket错误监听器已设置
-                    ensureWebSocketErrorListeners();
-                } else if (featureKey === 'timedRestart') {
-                    // 定时重启功能特殊处理
-                    logger.debug(`${featurePrefix}功能已启用，设置定时重启`);
-                    featureManager.toggleTimedRestart(true);
-                } else {
-                    // 常规定时功能
-                    logger.debug(`${featurePrefix}功能已启用，设置定时器`);
-                    // 直接启动功能，确保立即生效
-                    featureManager.startTimedFeature(featureKey, config.features[featureKey].interval);
-                }
+        if (enabled) {
+            if (featureKey === 'activateFurnace') {
+                // 对于激活熔炉功能，仍然直接执行，因为它不是定时任务
+                activateFurnaceAndStartSmelting();
+            } else if (featureKey === 'errorRestart') {
+                // 错误重启功能特殊处理
+                logger.debug(`${featurePrefix}功能已启用，重置错误计数`);
+                featureManager.resetWebSocketErrorCount();
+                // 确保WebSocket错误监听器已设置
+                ensureWebSocketErrorListeners();
+            } else if (featureKey === 'timedRestart') {
+                // 定时重启功能特殊处理
+                logger.debug(`${featurePrefix}功能已启用，设置定时重启`);
+                featureManager.toggleTimedRestart(true);
             } else {
-                // 禁用功能 - 立即调用stopFeature来停止功能，确保资源被释放
-                if (featureKey === 'timedRestart') {
-                    // 定时重启功能特殊处理
-                    featureManager.toggleTimedRestart(false);
+                if (skipIfRunning && timers[featureKey]) {
+                    logger.debug(`${featurePrefix}检测到定时器已运行，跳过重复启动`);
+                    return;
                 }
-                featureManager.stopFeature(featureKey);
+                // 常规定时功能
+                logger.debug(`${featurePrefix}功能已启用，设置定时器`);
+                // 直接启动功能，确保立即生效
+                featureManager.startTimedFeature(featureKey, feature.interval);
             }
+        } else {
+            // 禁用功能 - 立即调用stopFeature来停止功能，确保资源被释放
+            if (featureKey === 'timedRestart') {
+                // 定时重启功能特殊处理
+                featureManager.toggleTimedRestart(false);
+            }
+            featureManager.stopFeature(featureKey);
         }
     }
 
@@ -4211,18 +4225,57 @@ Fishing.clicks_boat('canoe_boat')
         logger.info('【调试系统】调试区域已初始化');
     }
 
+    const autoStartFeatureKeys = [
+        'copperSmelt',
+        'oilManagement',
+        'boatManagement',
+        'woodcutting',
+        'combat',
+        'trapHarvesting',
+        'animalCollection',
+        'errorRestart',
+        'timedRestart'
+    ];
+
     // 启动：在页面载入后立即根据配置启动已勾选功能，避免需要手动再次勾选
     function startEnabledFeaturesImmediately() {
         try {
-            const features = config.features || {};
-            Object.keys(features).forEach(featureKey => {
-                const feature = features[featureKey];
-                if (!feature || !feature.enabled) return;
-                if (!timers[featureKey]) {
-                    const interval = feature.interval || 1000;
-                    featureManager.startTimedFeature(featureKey, interval);
+            if (featureManager && typeof featureManager._loadRestartState === 'function') {
+                try {
+                    featureManager._loadRestartState();
+                } catch (loadErr) {
+                    logger.warn('【初始化】同步重启配置失败:', loadErr);
                 }
-            });
+            }
+
+            const features = config.features || {};
+
+            const startFeature = (featureKey, sourceTag) => {
+                const feature = features[featureKey];
+                if (!feature || !feature.enabled) {
+                    return;
+                }
+                if (timers[featureKey]) {
+                    logger.debug(`【启动恢复】${feature.name || featureKey} 已在运行，跳过重复启动`);
+                    return;
+                }
+                toggleFeature(featureKey, true, {
+                    skipSave: true,
+                    skipIfRunning: true,
+                    source: sourceTag
+                });
+            };
+
+            const triggerStartup = (tag) => {
+                autoStartFeatureKeys.forEach(key => startFeature(key, tag));
+            };
+
+            triggerStartup('启动恢复');
+
+            const delayedHandle = setTimeout(() => {
+                triggerStartup('启动恢复(延迟)');
+            }, 2000);
+            cleanupResources.addTimeout(delayedHandle);
         } catch (e) {
             logger.error('【初始化】应用已启用功能失败:', e);
         }
@@ -4492,7 +4545,7 @@ Fishing.clicks_boat('canoe_boat')
         // 添加统一安全检查，每5秒检查一次所有定时功能
         const safetyCheckInterval = setInterval(() => {
             // 需要检查的功能列表
-            const timedFeatures = ['copperSmelt', 'oilManagement', 'boatManagement', 'woodcutting', 'combat', 'errorRestart', 'timedRestart', 'animalCollection'];
+            const timedFeatures = ['copperSmelt', 'oilManagement', 'boatManagement', 'woodcutting', 'combat', 'trapHarvesting', 'errorRestart', 'timedRestart', 'animalCollection'];
 
             timedFeatures.forEach(featureName => {
                 const featurePrefix = featureName === 'copperSmelt' ? '【矿石熔炼】' :
@@ -4500,6 +4553,7 @@ Fishing.clicks_boat('canoe_boat')
                                      featureName === 'boatManagement' ? '【渔船管理】' :
                                      featureName === 'woodcutting' ? '【树木管理】' :
                                      featureName === 'combat' ? '【自动战斗】' :
+                                     featureName === 'trapHarvesting' ? '【陷阱收获】' :
                                      featureName === 'animalCollection' ? '【动物收集】' : '';
 
                 const feature = config.features[featureName];
