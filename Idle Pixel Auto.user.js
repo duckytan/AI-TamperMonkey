@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Idle Pixel Auto
 // @namespace    http://tampermonkey.net/
-// @version      2.3
+// @version      2.4
 // @description  自动进行Idle Pixel游戏中的各种操作
 // @author       Duckyの復活
 // @match        https://idle-pixel.com/login/play/
@@ -16,6 +16,10 @@
 
 /*
 更新日志：
+v2.4 (2025-10-23)
+1. 维护：同步更新脚本版本标识，便于发布管理
+2. 维护：扩充更新日志说明，方便后续追踪历史
+
 v2.3 (2025-10-22)
 1. 完善：刷新后恢复流程增加两阶段自动启动与 skipIfRunning 保护，避免重复写入配置并确保陷阱/动物/重启等模块全部恢复
 2. 修复：统一安全检查补齐陷阱收获模块，遇到禁用但仍在运行的计时器时立即回收，杜绝幽灵任务
