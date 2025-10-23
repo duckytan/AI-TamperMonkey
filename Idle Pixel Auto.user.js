@@ -1838,6 +1838,9 @@ Fishing.clicks_boat('canoe_boat')
                                 return true; // 视为已安排发送
                             }
                             logger.warn(`【WebSocket】socket非OPEN/CONNECTING状态: ${state}`);
+                            if (state === 2 || state === 3) {
+                                if (typeof this.handleWebSocketError === 'function') this.handleWebSocketError();
+                            }
                             return false;
                         } else {
                             // 无readyState的自定义socket（例如框架封装），直接尝试发送
@@ -1939,15 +1942,16 @@ Fishing.clicks_boat('canoe_boat')
                 // 检查WebSocket特性
                 const hasReadyState = typeof obj.readyState === 'number';
                 const hasSendMethod = typeof obj.send === 'function';
-                const isConnected = obj.readyState === 1 || obj.readyState === 0; // CONNECTING或OPEN状态
 
-                // 检查构造函数名称（如果可用）
-                const isWebSocketConstructor = obj.constructor &&
-                                            (obj.constructor.name === 'WebSocket' ||
-                                             obj.constructor.name === 'MozWebSocket');
+                if (!hasSendMethod) {
+                    return false;
+                }
 
-                // 即使不是标准WebSocket对象，只要有必要的方法和状态也可以使用
-                return hasSendMethod && (hasReadyState ? isConnected : true);
+                if (!hasReadyState) {
+                    return true;
+                }
+
+                return obj.readyState >= 0 && obj.readyState <= 3;
             } catch (e) {
                 logger.debug('【WebSocket】验证WebSocket对象时出错:', e);
                 return false;
