@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Idle Pixel Auto
 // @namespace    http://tampermonkey.net/
-// @version      2.2
+// @version      2.3
 // @description  自动进行Idle Pixel游戏中的各种操作
 // @author       Duckyの復活
 // @match        https://idle-pixel.com/login/play/
@@ -16,6 +16,12 @@
 
 /*
 更新日志：
+v2.3 (2025-10-22)
+1. 完善：刷新后恢复流程增加两阶段自动启动与 skipIfRunning 保护，避免重复写入配置并确保陷阱/动物/重启等模块全部恢复
+2. 修复：统一安全检查补齐陷阱收获模块，遇到禁用但仍在运行的计时器时立即回收，杜绝幽灵任务
+3. 优化：DOM 监控与日志输出增加防抖去重，显著减少页面刷新时的日志噪声
+4. 优化：重启状态加载加入异常捕获，避免单个配置损坏阻断整体初始化
+
 v2.2 (2025-10-21)
 1. 修复：刷新页面后，已勾选的 Mod 功能自动生效，无需手工再次勾选
 2. 修复：熔炼矿石启用“随机”时，下拉菜单会跟随显示当前随机到的矿石
@@ -140,7 +146,7 @@ Fishing.clicks_boat('canoe_boat')
     'use strict';
 
     // 统一版本号
-    const scriptVersion = '2.2';
+    const scriptVersion = '2.3';
     const featurePrefix = '【IdlePixelAuto】';
 
     // ================ 日志管理 ================
