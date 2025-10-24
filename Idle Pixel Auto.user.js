@@ -149,6 +149,22 @@ websocket.send('SMELT=faradox_ore~10');
 Fishing.clicks_boat('row_boat')
 Fishing.clicks_boat('canoe_boat')
 
+煤炭熔炼指令
+ - 名称对应：
+原木			logs
+柳木原木		willow_logs
+枫木原木		maple_logs
+星尘原木		stardust_logs
+红木原木		redwood_logs
+密实原木		dense_logs
+ - 炼媒指令：
+websocket.send("FOUNDRY=logs~100")
+websocket.send("FOUNDRY=willow_logs~100")
+websocket.send("FOUNDRY=maple_logs~100")
+websocket.send("FOUNDRY=stardust_logs~100")
+websocket.send("FOUNDRY=redwood_logs~100")
+websocket.send("FOUNDRY=dense_logs~100")
+
 */
 
 (function() {
