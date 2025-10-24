@@ -1620,6 +1620,24 @@ websocket.send("FOUNDRY=dense_logs~100")
                 config.save();
             }
 
+            const oilValues = elementFinders.findOilValues();
+            if (!oilValues) {
+                logger.warn('【煤炭熔炼】无法获取石油数量，跳过本轮');
+                return false;
+            }
+
+            const currentOil = Number(oilValues.current);
+            if (!Number.isFinite(currentOil)) {
+                logger.warn('【煤炭熔炼】石油数值异常，跳过本轮');
+                return false;
+            }
+
+            const requiredOil = refineCount * 10;
+            if (currentOil < requiredOil) {
+                logger.info(`【煤炭熔炼】石油不足，当前${currentOil}，需要${requiredOil}，跳过本轮`);
+                return false;
+            }
+
             const message = `FOUNDRY=${selectedLog}~${refineCount}`;
             const displayName = logNameMap[selectedLog] || selectedLog;
             const ok = this.sendWebSocketMessage(message);
