@@ -151,12 +151,12 @@ Fishing.clicks_boat('canoe_boat')
 
 煤炭熔炼指令
  - 名称对应：
-原木			logs
-柳木原木		willow_logs
-枫木原木		maple_logs
-星尘原木		stardust_logs
-红木原木		redwood_logs
-密实原木		dense_logs
+原木            logs
+柳木原木        willow_logs
+枫木原木        maple_logs
+星尘原木        stardust_logs
+红木原木        redwood_logs
+密实原木        dense_logs
  - 炼媒指令：
 websocket.send("FOUNDRY=logs~100")
 websocket.send("FOUNDRY=willow_logs~100")
@@ -4883,11 +4883,18 @@ websocket.send("FOUNDRY=dense_logs~100")
 
     // 添加全局鼠标位置跟踪以修复Animations.js中的mouseX未定义错误
     function setupGlobalMouseTracking() {
-        // 定义全局mouseX和mouseY变量
-        window.mouseX = 0;
-        window.mouseY = 0;
+        if (window.__idlePixelAutoMouseTrackingSetup) {
+            return;
+        }
+        window.__idlePixelAutoMouseTrackingSetup = true;
 
-        // 添加鼠标移动事件监听器
+        if (typeof window.mouseX !== 'number') {
+            window.mouseX = 0;
+        }
+        if (typeof window.mouseY !== 'number') {
+            window.mouseY = 0;
+        }
+
         document.addEventListener('mousemove', function(event) {
             window.mouseX = event.clientX;
             window.mouseY = event.clientY;
@@ -4896,11 +4903,11 @@ websocket.send("FOUNDRY=dense_logs~100")
         logger.debug('【鼠标跟踪】已设置全局鼠标位置跟踪');
     }
 
+    // 在脚本加载时立即设置鼠标位置跟踪，确保第三方脚本访问不会报错
+    setupGlobalMouseTracking();
+
     // 当页面加载完成后开始执行
     window.addEventListener('load', function() {
-        // 首先设置全局鼠标跟踪以防止Animations.js错误
-        setupGlobalMouseTracking();
-        // 然后初始化脚本
         init();
     });
 
