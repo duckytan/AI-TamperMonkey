@@ -151,12 +151,12 @@ Fishing.clicks_boat('canoe_boat')
 
 煤炭熔炼指令
  - 名称对应：
-原木			logs
-柳木原木		willow_logs
-枫木原木		maple_logs
-星尘原木		stardust_logs
-红木原木		redwood_logs
-密实原木		dense_logs
+原木            logs
+柳木原木        willow_logs
+枫木原木        maple_logs
+星尘原木        stardust_logs
+红木原木        redwood_logs
+密实原木        dense_logs
  - 炼媒指令：
 websocket.send("FOUNDRY=logs~100")
 websocket.send("FOUNDRY=willow_logs~100")
@@ -2819,7 +2819,20 @@ websocket.send("FOUNDRY=dense_logs~100")
 
     // 确保WebSocket错误监听器已设置
     function ensureWebSocketErrorListeners() {
-        // 查找并监听所有可能的WebSocket实例的错误
+        const SOCKET_FLAG = '__ipa_ws_error_listener_added';
+        const HOOK_FLAG = '__ipa_ws_hooked';
+        const ORIGINAL_CTOR_KEY = '__ipa_ws_original_constructor';
+
+        const roots = [];
+        try {
+            if (typeof unsafeWindow !== 'undefined' && unsafeWindow) {
+                roots.push({ root: unsafeWindow, label: 'unsafeWindow' });
+            }
+        } catch (e) {
+            logger.debug('【错误重启】访问unsafeWindow时出错:', e);
+        }
+        roots.push({ root: window, label: 'window' });
+
         const allPossibleSocketNames = [
             'gameSocket', 'websocket', 'socket', 'ws',
             'game_socket', 'connection', 'wsConnection', 'socketConnection',
@@ -2827,70 +2840,151 @@ websocket.send("FOUNDRY=dense_logs~100")
             'idleSocket', 'pixelSocket', 'idlePixelSocket', 'gameClient',
             'socketClient', 'wsClient', 'connectionClient', 'gameWS'
         ];
+        const gameObjects = ['Game', 'IdleGame', 'PixelGame', 'MainGame', 'IdlePixel'];
+        const processedRoots = new Set();
 
-        // 检查window对象上的WebSocket实例
-        for (const socketName of allPossibleSocketNames) {
-            const socket = window[socketName];
-            if (socket && typeof socket === 'object' && socket.constructor && (socket.constructor.name === 'WebSocket' || socket instanceof WebSocket)) {
-                try {
-                    // 确保只添加一次监听器
-                    if (!socket._errorRestartListenerAdded) {
-                        socket._errorRestartListenerAdded = true;
-                        socket.addEventListener('error', function() {
-                            if (config.features.errorRestart && config.features.errorRestart.enabled) {
-                                featureManager.handleWebSocketError();
-                            }
-                        });
-                        socket.addEventListener('close', function(event) {
-                            // 非正常关闭时视为错误
-                            if (config.features.errorRestart && config.features.errorRestart.enabled && !event.wasClean) {
-                                featureManager.handleWebSocketError();
-                            }
-                        });
-                        logger.debug(`【错误重启】已为 ${socketName} 添加错误监听器`);
-                    }
-                } catch (e) {
-                    logger.warn(`【错误重启】为 ${socketName} 添加监听器时出错:`, e);
+        const addListeners = (socket, label) => {
+            if (!socket || typeof socket !== 'object') return;
+            if (typeof socket.send !== 'function') return;
+            if (socket[SOCKET_FLAG] || socket._errorRestartListenerAdded) return;
+
+            const triggerErrorCount = (eventType, event) => {
+                if (!(config.features.errorRestart && config.features.errorRestart.enabled)) {
+                    return;
                 }
-            }
-        }
-
-        // 兜底方案：挂钩全局WebSocket构造函数，确保新建的连接也能被监听
-        try {
-            if (!window.__ipa_ws_hooked && typeof window.WebSocket === 'function') {
-                window.__ipa_ws_hooked = true;
-                const OriginalWebSocket = window.WebSocket;
-
-                const HookedWebSocket = function(...args) {
-                    const ws = new OriginalWebSocket(...args);
-                    try {
-                        if (!ws._errorRestartListenerAdded) {
-                            ws._errorRestartListenerAdded = true;
-                            ws.addEventListener('error', function() {
-                                if (config.features.errorRestart && config.features.errorRestart.enabled) {
-                                    featureManager.handleWebSocketError();
-                                }
-                            });
-                            ws.addEventListener('close', function(event) {
-                                if (config.features.errorRestart && config.features.errorRestart.enabled && !event.wasClean) {
-                                    featureManager.handleWebSocketError();
-                                }
-                            });
-                        }
-                    } catch (e) {
-                        // 忽略
+                if (eventType === 'close') {
+                    if (!event || event.wasClean === false) {
+                        featureManager.handleWebSocketError();
                     }
-                    return ws;
-                };
+                } else {
+                    featureManager.handleWebSocketError();
+                }
+            };
 
-                // 保留原型链和静态属性
-                HookedWebSocket.prototype = OriginalWebSocket.prototype;
-                Object.setPrototypeOf(HookedWebSocket, OriginalWebSocket);
-                window.WebSocket = HookedWebSocket;
-                logger.info('【错误重启】已挂钩全局WebSocket构造函数');
+            const onError = () => triggerErrorCount('error');
+            const onClose = (event) => triggerErrorCount('close', event);
+
+            try {
+                if (typeof socket.addEventListener === 'function') {
+                    socket.addEventListener('error', onError);
+                    socket.addEventListener('close', onClose);
+                } else {
+                    const originalOnError = socket.onerror;
+                    socket.onerror = function(...args) {
+                        try { onError.apply(this, args); } catch (hookErr) { logger.debug('【错误重启】处理socket.onerror时出错:', hookErr); }
+                        if (typeof originalOnError === 'function') {
+                            try { return originalOnError.apply(this, args); } catch (originalErr) { logger.error('【错误重启】socket.onerror原始处理异常:', originalErr); }
+                        }
+                    };
+                    const originalOnClose = socket.onclose;
+                    socket.onclose = function(event, ...rest) {
+                        try { onClose.call(this, event); } catch (hookErr) { logger.debug('【错误重启】处理socket.onclose时出错:', hookErr); }
+                        if (typeof originalOnClose === 'function') {
+                            try { return originalOnClose.call(this, event, ...rest); } catch (originalErr) { logger.error('【错误重启】socket.onclose原始处理异常:', originalErr); }
+                        }
+                    };
+                }
+                socket[SOCKET_FLAG] = true;
+                socket._errorRestartListenerAdded = true;
+                logger.debug(`【错误重启】已为 ${label} 添加错误监听器`);
+            } catch (e) {
+                logger.warn(`【错误重启】为 ${label} 添加监听器时出错:`, e);
             }
-        } catch (e) {
-            logger.warn('【错误重启】挂钩全局WebSocket失败:', e);
+        };
+
+        const wrapSend = (ctor, label) => {
+            if (!ctor || !ctor.prototype || ctor.prototype.__ipa_ws_send_wrapped) return;
+            const originalSend = ctor.prototype.send;
+            if (typeof originalSend !== 'function') return;
+
+            const wrappedSend = function(...args) {
+                try {
+                    return originalSend.apply(this, args);
+                } catch (err) {
+                    logger.debug(`【错误重启】捕获WebSocket.send异常 (${label}):`, err);
+                    if (config.features.errorRestart && config.features.errorRestart.enabled) {
+                        featureManager.handleWebSocketError();
+                    }
+                    throw err;
+                }
+            };
+
+            try {
+                ctor.prototype.send = wrappedSend;
+                ctor.prototype.__ipa_ws_send_wrapped = true;
+                logger.info(`【错误重启】已包装${label}.WebSocket.send`);
+            } catch (e) {
+                logger.warn(`【错误重启】包装${label}.WebSocket.send失败:`, e);
+            }
+        };
+
+        const ensureConstructorHook = (root, label) => {
+            try {
+                if (!root || typeof root.WebSocket !== 'function') return;
+
+                if (!root[ORIGINAL_CTOR_KEY]) {
+                    root[ORIGINAL_CTOR_KEY] = root.WebSocket;
+                }
+
+                const OriginalWebSocket = root[ORIGINAL_CTOR_KEY];
+
+                if (!root[HOOK_FLAG]) {
+                    const HookedWebSocket = function(...args) {
+                        const ws = new OriginalWebSocket(...args);
+                        addListeners(ws, `${label}.WebSocket实例`);
+                        return ws;
+                    };
+                    HookedWebSocket.prototype = OriginalWebSocket.prototype;
+                    Object.setPrototypeOf(HookedWebSocket, OriginalWebSocket);
+                    root.WebSocket = HookedWebSocket;
+                    root[HOOK_FLAG] = true;
+                    logger.info(`【错误重启】已挂钩${label}.WebSocket构造函数`);
+                }
+
+                wrapSend(OriginalWebSocket, label);
+            } catch (e) {
+                logger.warn(`【错误重启】挂钩${label}.WebSocket失败:`, e);
+            }
+        };
+
+        for (const { root, label } of roots) {
+            if (!root || processedRoots.has(root)) continue;
+            processedRoots.add(root);
+
+            for (const socketName of allPossibleSocketNames) {
+                try {
+                    const socket = root[socketName];
+                    if (socket) {
+                        addListeners(socket, `${label}.${socketName}`);
+                    }
+                } catch (e) { /* ignore */ }
+            }
+
+            for (const gameObjName of gameObjects) {
+                try {
+                    const gameObj = root[gameObjName];
+                    if (!gameObj) continue;
+                    if (gameObj.socket) addListeners(gameObj.socket, `${label}.${gameObjName}.socket`);
+                    if (gameObj.connection) addListeners(gameObj.connection, `${label}.${gameObjName}.connection`);
+                    if (gameObj.ws) addListeners(gameObj.ws, `${label}.${gameObjName}.ws`);
+                } catch (e) { /* ignore */ }
+            }
+
+            try {
+                const keys = Object.keys(root).filter(k => /(socket|ws)/i.test(k));
+                for (const key of keys) {
+                    try {
+                        const socket = root[key];
+                        if (socket) {
+                            addListeners(socket, `${label}['${key}']`);
+                        }
+                    } catch (e) { /* ignore */ }
+                }
+            } catch (e) {
+                // ignore
+            }
+
+            ensureConstructorHook(root, label);
         }
     }
 
