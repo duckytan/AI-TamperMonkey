@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Idle Pixel Auto
 // @namespace    http://tampermonkey.net/
-// @version      2.4
+// @version      2.5
 // @description  自动进行Idle Pixel游戏中的各种操作
 // @author       Duckyの復活
 // @match        https://idle-pixel.com/login/play/
@@ -16,6 +16,11 @@
 
 /*
 更新日志：
+v2.5 (2025-10-24)
+1. 新增：采矿精炼分区新增“煤炭熔炼”栏目，支持选择木材并定时送入煤窑
+2. 新增：煤炭熔炼支持随机木材模式，随机结果会实时同步到下拉列表
+3. 优化：仅在煤窑状态为 Idle 时发送 FOUNDRY 指令，避免重复触发
+
 v2.4 (2025-10-23)
 1. 维护：同步更新脚本版本标识，便于发布管理
 2. 维护：扩充更新日志说明，方便后续追踪历史
@@ -150,7 +155,7 @@ Fishing.clicks_boat('canoe_boat')
     'use strict';
 
     // 统一版本号
-    const scriptVersion = '2.3';
+    const scriptVersion = '2.5';
     const featurePrefix = '【IdlePixelAuto】';
 
     // ================ 日志管理 ================
@@ -243,6 +248,14 @@ Fishing.clicks_boat('canoe_boat')
                 selectedOre: 'copper', // 默认选择铜矿石
                 refineCount: 10 // 默认精炼数量
             },
+            charcoalFoundry: {
+                enabled: false,
+                interval: 60000, // 默认60秒
+                name: '煤炭熔炼',
+                selectedLog: 'logs',
+                refineCount: 100,
+                randomEnabled: false
+            },
             oilManagement: {
                 enabled: true,
                 interval: 30000, // 默认30秒
@@ -304,6 +317,10 @@ Fishing.clicks_boat('canoe_boat')
                 case 'selectedOre':
                     // 矿石类型必须是有效值
                     return ['copper', 'iron', 'silver', 'gold', 'platinum'].includes(value);
+                case 'selectedLog':
+                    return ['logs', 'willow_logs', 'maple_logs', 'stardust_logs', 'redwood_logs', 'dense_logs'].includes(value);
+                case 'randomEnabled':
+                    return typeof value === 'boolean';
                 case 'refineCount':
                     // 精炼数量必须是正整数
                     return typeof value === 'number' && value > 0 && value === Math.floor(value);
@@ -330,6 +347,14 @@ Fishing.clicks_boat('canoe_boat')
                     name: '矿石熔炼',
                     selectedOre: 'copper',
                     refineCount: 10 // 默认精炼数量
+                },
+                charcoalFoundry: {
+                    enabled: false,
+                    interval: 60000,
+                    name: '煤炭熔炼',
+                    selectedLog: 'logs',
+                    refineCount: 100,
+                    randomEnabled: false
                 },
                 activateFurnace: {
                     enabled: true,
@@ -1487,6 +1512,111 @@ Fishing.clicks_boat('canoe_boat')
             }
         },
 
+        executeCharcoalFoundry: function() {
+            if (!utils.checkWebSocketConnection()) {
+                logger.warn('【煤炭熔炼】WebSocket连接异常，跳过操作');
+                return false;
+            }
+
+            const statusEl = document.getElementById('charcoal_foundry-status');
+            if (!statusEl) {
+                logger.debug('【煤炭熔炼】未找到煤窑状态标签，跳过执行');
+                return false;
+            }
+
+            const statusText = (statusEl.textContent || '').trim().toLowerCase();
+            if (!statusText || !statusText.includes('idle')) {
+                logger.debug(`【煤炭熔炼】煤窑状态为 ${statusText || '未知'}，跳过本轮`);
+                return false;
+            }
+
+            if (!config.features.charcoalFoundry) {
+                config.features.charcoalFoundry = {
+                    enabled: false,
+                    interval: 60000,
+                    name: '煤炭熔炼',
+                    selectedLog: 'logs',
+                    refineCount: 100,
+                    randomEnabled: false
+                };
+            }
+
+            const featureConfig = config.features.charcoalFoundry;
+            const availableLogs = ['logs', 'willow_logs', 'maple_logs', 'stardust_logs', 'redwood_logs', 'dense_logs'];
+            const logNameMap = {
+                logs: '原木',
+                willow_logs: '柳木原木',
+                maple_logs: '枫木原木',
+                stardust_logs: '星尘原木',
+                redwood_logs: '红木原木',
+                dense_logs: '密实原木'
+            };
+
+            let selectedLog = featureConfig.selectedLog || 'logs';
+            let refineCount = parseInt(featureConfig.refineCount, 10);
+            const isRandomEnabled = !!featureConfig.randomEnabled;
+            let configChanged = false;
+
+            const syncSelectValue = (value) => {
+                try {
+                    const selectEl = document.querySelector('#auto-copper-smelt-panel .charcoal-log-select[data-feature="selectedLog"]');
+                    if (selectEl) {
+                        selectEl.value = value;
+                        Array.from(selectEl.options).forEach(opt => {
+                            opt.selected = (opt.value === value);
+                        });
+                    }
+                } catch (e) { /* 忽略UI同步异常 */ }
+            };
+
+            const syncRefineInput = (value) => {
+                try {
+                    const inputEl = document.querySelector('#auto-copper-smelt-panel .charcoal-refine-count');
+                    if (inputEl) {
+                        inputEl.value = value;
+                    }
+                } catch (e) { /* 忽略UI同步异常 */ }
+            };
+
+            if (!availableLogs.includes(selectedLog)) {
+                selectedLog = 'logs';
+                featureConfig.selectedLog = selectedLog;
+                configChanged = true;
+                syncSelectValue(selectedLog);
+            }
+
+            if (isRandomEnabled) {
+                selectedLog = availableLogs[Math.floor(Math.random() * availableLogs.length)];
+                featureConfig.selectedLog = selectedLog;
+                configChanged = true;
+                syncSelectValue(selectedLog);
+                logger.info(`【煤炭熔炼】随机选择木材: ${logNameMap[selectedLog] || selectedLog}`);
+            }
+
+            if (isNaN(refineCount) || refineCount <= 0) {
+                refineCount = 100;
+                featureConfig.refineCount = refineCount;
+                configChanged = true;
+                syncRefineInput(refineCount);
+            }
+
+            if (configChanged) {
+                config.save();
+            }
+
+            const message = `FOUNDRY=${selectedLog}~${refineCount}`;
+            const displayName = logNameMap[selectedLog] || selectedLog;
+            const ok = this.sendWebSocketMessage(message);
+
+            if (ok) {
+                logger.info(`【煤炭熔炼】已发送FOUNDRY指令: ${displayName} x ${refineCount}`);
+                return true;
+            } else {
+                logger.warn(`【煤炭熔炼】发送FOUNDRY指令失败: ${displayName} x ${refineCount}`);
+                return false;
+            }
+        },
+
         // 执行熔炉激活
         
 
@@ -2050,6 +2180,7 @@ Fishing.clicks_boat('canoe_boat')
         // 开始定时功能
         startTimedFeature: function(featureName, interval) {
             const featurePrefix = featureName === 'copperSmelt' ? '【矿石熔炼】' :
+                                 featureName === 'charcoalFoundry' ? '【煤炭熔炼】' :
                                  featureName === 'oilManagement' ? '【石油管理】' :
                                  featureName === 'boatManagement' ? '【渔船管理】' :
                                  featureName === 'woodcutting' ? '【树木管理】' :
@@ -2076,6 +2207,8 @@ Fishing.clicks_boat('canoe_boat')
                 try {
                     if (featureName === 'copperSmelt') {
                         this.executeCopperSmelt();
+                    } else if (featureName === 'charcoalFoundry') {
+                        this.executeCharcoalFoundry();
                     } else if (featureName === 'oilManagement') {
                         this.executeOilManagement();
                     } else if (featureName === 'boatManagement') {
@@ -2110,6 +2243,8 @@ Fishing.clicks_boat('canoe_boat')
                     // 尝试执行功能
                     if (featureName === 'copperSmelt') {
                         this.executeCopperSmelt();
+                    } else if (featureName === 'charcoalFoundry') {
+                        this.executeCharcoalFoundry();
                     } else if (featureName === 'oilManagement') {
                         this.executeOilManagement();
                     } else if (featureName === 'boatManagement') {
@@ -2489,6 +2624,7 @@ Fishing.clicks_boat('canoe_boat')
         // 停止功能（保留原逻辑，增强定时重启的停止）
         stopFeature: function(featureName) {
             const featurePrefix = featureName === 'copperSmelt' ? '【矿石熔炼】' :
+                                 featureName === 'charcoalFoundry' ? '【煤炭熔炼】' :
                                  featureName === 'oilManagement' ? '【石油管理】' :
                                  featureName === 'boatManagement' ? '【渔船管理】' :
                                  featureName === 'woodcutting' ? '【树木管理】' :
@@ -2581,6 +2717,7 @@ Fishing.clicks_boat('canoe_boat')
     // 切换功能状态
     function toggleFeature(featureKey, enabled, options = {}) {
         const featurePrefix = featureKey === 'copperSmelt' ? '【矿石熔炼】' :
+                             featureKey === 'charcoalFoundry' ? '【煤炭熔炼】' :
                              featureKey === 'oilManagement' ? '【石油管理】' :
                              featureKey === 'boatManagement' ? '【渔船管理】' :
                              featureKey === 'woodcutting' ? '【树木管理】' :
@@ -2732,6 +2869,7 @@ Fishing.clicks_boat('canoe_boat')
     // 更新功能间隔时间
     function updateFeatureInterval(featureKey, interval) {
         const featurePrefix = featureKey === 'copperSmelt' ? '【矿石熔炼】' :
+                             featureKey === 'charcoalFoundry' ? '【煤炭熔炼】' :
                              featureKey === 'oilManagement' ? '【石油管理】' :
                              featureKey === 'boatManagement' ? '【渔船管理】' :
                              featureKey === 'woodcutting' ? '【树木管理】' :
@@ -2751,7 +2889,7 @@ Fishing.clicks_boat('canoe_boat')
             logger.debug(`${featurePrefix}间隔配置已保存`);
 
             // 如果功能已启用，先停止当前运行的功能，然后由安全检查定时器自动重新启动
-            if (feature.enabled && (featureKey === 'copperSmelt' || featureKey === 'oilManagement' ||
+            if (feature.enabled && (featureKey === 'copperSmelt' || featureKey === 'charcoalFoundry' || featureKey === 'oilManagement' ||
                 featureKey === 'boatManagement' || featureKey === 'woodcutting' ||
                 featureKey === 'combat')) {
                 logger.info(`${featurePrefix}停止当前运行的功能，等待安全检查定时器应用新间隔后重启`);
@@ -3299,6 +3437,7 @@ Fishing.clicks_boat('canoe_boat')
         // 功能描述信息
         const featureDescriptions = {
             copperSmelt: '自动冶炼矿石',
+            charcoalFoundry: '自动将木材转化为木炭',
             activateFurnace: '自动激活熔炉',
             oilManagement: '自动管理石油生产',
             boatManagement: '自动管理渔船（收集和发送）',
@@ -3512,7 +3651,100 @@ Fishing.clicks_boat('canoe_boat')
             }
         });
 
-        
+        if (!config.features.charcoalFoundry) {
+            config.features.charcoalFoundry = { enabled: false, interval: 60000, name: '煤炭熔炼', selectedLog: 'logs', refineCount: 100, randomEnabled: false };
+        }
+        const charcoalConfig = config.features.charcoalFoundry;
+        const charcoalRow = document.createElement('div');
+        charcoalRow.className = 'feature-row';
+        const charcoalEnabled = charcoalConfig && charcoalConfig.enabled;
+        const charcoalInterval = ((charcoalConfig && charcoalConfig.interval) || 60000) / 1000;
+        const charcoalSelectedLog = (charcoalConfig && charcoalConfig.selectedLog) || 'logs';
+        const charcoalRandomEnabled = !!(charcoalConfig && charcoalConfig.randomEnabled);
+        const charcoalRefineCount = (charcoalConfig && charcoalConfig.refineCount) || 100;
+
+        charcoalRow.innerHTML = `
+            <input type="checkbox" class="feature-checkbox" data-feature="charcoalFoundry" ${charcoalEnabled ? 'checked' : ''}>
+            <span class="feature-name" title="定时检测煤窑状态，空闲时自动送入木材熔炼为木炭" data-bs-toggle="tooltip" data-bs-placement="right">煤炭熔炼</span>
+            <input type="number" class="feature-interval" value="${charcoalInterval}" min="10" step="5">
+            <span class="interval-label">秒/次</span>
+            <select class="charcoal-log-select" data-feature="selectedLog" ${charcoalRandomEnabled ? 'disabled' : ''}>
+                <option value="logs" ${charcoalSelectedLog === 'logs' ? 'selected' : ''}>原木</option>
+                <option value="willow_logs" ${charcoalSelectedLog === 'willow_logs' ? 'selected' : ''}>柳木原木</option>
+                <option value="maple_logs" ${charcoalSelectedLog === 'maple_logs' ? 'selected' : ''}>枫木原木</option>
+                <option value="stardust_logs" ${charcoalSelectedLog === 'stardust_logs' ? 'selected' : ''}>星尘原木</option>
+                <option value="redwood_logs" ${charcoalSelectedLog === 'redwood_logs' ? 'selected' : ''}>红木原木</option>
+                <option value="dense_logs" ${charcoalSelectedLog === 'dense_logs' ? 'selected' : ''}>密实原木</option>
+            </select>
+            <label style="display: flex; align-items: center; margin-left: 10px; font-size: 12px;">
+                <input type="checkbox" class="charcoal-random-checkbox" data-feature="charcoalRandom" ${charcoalRandomEnabled ? 'checked' : ''}>
+                <span style="margin-left: 5px;">随机</span>
+            </label>
+            <input type="number" class="charcoal-refine-count" value="${charcoalRefineCount}" min="1" max="1000" style="width: 60px; margin-left: 5px;">
+            <span class="refine-count-label" style="margin-left: 5px; font-size: 12px;">个/次</span>
+        `;
+
+        miningContent.appendChild(charcoalRow);
+
+        charcoalRow.querySelector('input[data-feature="charcoalFoundry"]').addEventListener('change', function(e) {
+            if (!config.features.charcoalFoundry) {
+                config.features.charcoalFoundry = { enabled: false, interval: 60000, name: '煤炭熔炼', selectedLog: 'logs', refineCount: 100, randomEnabled: false };
+            }
+            toggleFeature('charcoalFoundry', e.target.checked);
+            setTimeout(adjustPanelSize, 0);
+        });
+
+        charcoalRow.querySelector('.feature-interval').addEventListener('change', function(e) {
+            if (!config.features.charcoalFoundry) {
+                config.features.charcoalFoundry = { enabled: false, interval: 60000, name: '煤炭熔炼', selectedLog: 'logs', refineCount: 100, randomEnabled: false };
+            }
+            const value = parseInt(e.target.value);
+            if (!isNaN(value) && value > 0) {
+                updateFeatureInterval('charcoalFoundry', value * 1000);
+            } else {
+                const currentInterval = (config.features.charcoalFoundry && config.features.charcoalFoundry.interval || 60000) / 1000;
+                e.target.value = currentInterval;
+            }
+        });
+
+        charcoalRow.querySelector('.charcoal-log-select').addEventListener('change', function(e) {
+            if (!config.features.charcoalFoundry) {
+                config.features.charcoalFoundry = { enabled: false, interval: 60000, name: '煤炭熔炼', selectedLog: 'logs', refineCount: 100, randomEnabled: false };
+            }
+            config.features.charcoalFoundry.selectedLog = e.target.value;
+            config.save();
+        });
+
+        charcoalRow.querySelector('.charcoal-random-checkbox').addEventListener('change', function(e) {
+            if (!config.features.charcoalFoundry) {
+                config.features.charcoalFoundry = { enabled: false, interval: 60000, name: '煤炭熔炼', selectedLog: 'logs', refineCount: 100, randomEnabled: false };
+            }
+            config.features.charcoalFoundry.randomEnabled = e.target.checked;
+            config.save();
+            const logSelect = charcoalRow.querySelector('.charcoal-log-select');
+            logSelect.disabled = e.target.checked;
+            if (!e.target.checked) {
+                const currentValue = config.features.charcoalFoundry.selectedLog || 'logs';
+                logSelect.value = currentValue;
+                Array.from(logSelect.options).forEach(opt => {
+                    opt.selected = (opt.value === currentValue);
+                });
+            }
+            setTimeout(adjustPanelSize, 0);
+        });
+
+        charcoalRow.querySelector('.charcoal-refine-count').addEventListener('change', function(e) {
+            if (!config.features.charcoalFoundry) {
+                config.features.charcoalFoundry = { enabled: false, interval: 60000, name: '煤炭熔炼', selectedLog: 'logs', refineCount: 100, randomEnabled: false };
+            }
+            const value = parseInt(e.target.value);
+            if (!isNaN(value) && value >= 1 && value <= 1000) {
+                config.features.charcoalFoundry.refineCount = value;
+                config.save();
+            } else {
+                e.target.value = config.features.charcoalFoundry.refineCount || 100;
+            }
+        });
 
         // 2. 种植收集分区
         const farmingSection = createSectionTitle('种植收集');
@@ -4241,6 +4473,7 @@ Fishing.clicks_boat('canoe_boat')
 
     const autoStartFeatureKeys = [
         'copperSmelt',
+        'charcoalFoundry',
         'oilManagement',
         'boatManagement',
         'woodcutting',
@@ -4559,10 +4792,11 @@ Fishing.clicks_boat('canoe_boat')
         // 添加统一安全检查，每5秒检查一次所有定时功能
         const safetyCheckInterval = setInterval(() => {
             // 需要检查的功能列表
-            const timedFeatures = ['copperSmelt', 'oilManagement', 'boatManagement', 'woodcutting', 'combat', 'trapHarvesting', 'errorRestart', 'timedRestart', 'animalCollection'];
+            const timedFeatures = ['copperSmelt', 'charcoalFoundry', 'oilManagement', 'boatManagement', 'woodcutting', 'combat', 'trapHarvesting', 'errorRestart', 'timedRestart', 'animalCollection'];
 
             timedFeatures.forEach(featureName => {
                 const featurePrefix = featureName === 'copperSmelt' ? '【矿石熔炼】' :
+                                     featureName === 'charcoalFoundry' ? '【煤炭熔炼】' :
                                      featureName === 'oilManagement' ? '【石油管理】' :
                                      featureName === 'boatManagement' ? '【渔船管理】' :
                                      featureName === 'woodcutting' ? '【树木管理】' :
