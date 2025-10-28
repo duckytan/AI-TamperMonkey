@@ -376,6 +376,81 @@ websocket.send("FOUNDRY=dense_logs~100")
         return featureMetadata[featureKey] ? { ...defaults, ...featureMetadata[featureKey] } : defaults;
     };
 
+    // ================ UI 构建工具 ================
+    const uiBuilder = {
+        createFeatureRow: function(options) {
+            const {
+                featureKey,
+                label,
+                tooltip = '',
+                hasInterval = true,
+                intervalStep = 5,
+                extraFields = [],
+                onToggle,
+                onIntervalChange
+            } = options;
+
+            const feature = config.features[featureKey] || {};
+            const enabled = !!feature.enabled;
+            const interval = hasInterval ? (feature.interval || 30000) / 1000 : 0;
+
+            const row = document.createElement('div');
+            row.className = 'feature-row';
+
+            let html = `
+                <input type="checkbox" class="feature-checkbox" data-feature="${featureKey}" ${enabled ? 'checked' : ''}>
+                <span class="feature-name" title="${tooltip}" data-bs-toggle="tooltip" data-bs-placement="right">${label}</span>
+            `;
+
+            if (hasInterval) {
+                html += `
+                    <input type="number" class="feature-interval" value="${interval}" min="${intervalStep}" step="${intervalStep}">
+                    <span class="interval-label">秒/次</span>
+                `;
+            }
+
+            extraFields.forEach(field => {
+                html += field.html || '';
+            });
+
+            row.innerHTML = html;
+
+            const checkbox = row.querySelector('.feature-checkbox');
+            checkbox.addEventListener('change', (e) => {
+                toggleFeature(featureKey, e.target.checked);
+                if (typeof onToggle === 'function') {
+                    onToggle(e.target.checked, row);
+                }
+            });
+
+            if (hasInterval) {
+                const intervalInput = row.querySelector('.feature-interval');
+                intervalInput.addEventListener('change', (e) => {
+                    const value = parseInt(e.target.value);
+                    if (!isNaN(value) && value > 0) {
+                        updateFeatureInterval(featureKey, value * 1000);
+                        if (typeof onIntervalChange === 'function') {
+                            onIntervalChange(value, row);
+                        }
+                    } else {
+                        intervalInput.value = interval;
+                    }
+                });
+            }
+
+            extraFields.forEach(field => {
+                if (field.selector && field.handler) {
+                    const element = row.querySelector(field.selector);
+                    if (element) {
+                        field.handler(element, featureKey, row);
+                    }
+                }
+            });
+
+            return row;
+        }
+    };
+
     const config = {
         globalSettings: {
             logLevel: 2
