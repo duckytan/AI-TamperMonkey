@@ -4351,16 +4351,19 @@ websocket.send("FOUNDRY=dense_logs~100")
         const systemContent = systemSection.contentContainer;
 
         // 重启控制小节
+        // 加载当前重启状态
         featureManager._loadRestartState();
         const restartState = featureManager.restart;
 
         // 子标题
+        // 顶部标题用于对重启控制功能进行说明
         const restartTitleRow = document.createElement('div');
         restartTitleRow.className = 'feature-row';
         restartTitleRow.innerHTML = `<span class="feature-name" style="font-weight: bold;">重启控制</span><div class="feature-description">错误重启、定时重启与刷新检测统一配置</div>`;
         systemContent.appendChild(restartTitleRow);
 
         // 刷新网址与检测
+        // 创建刷新URL输入行，包含URL输入框、刷新按钮、检测按钮和检测结果显示
         const restartUrlRow = document.createElement('div');
         restartUrlRow.className = 'feature-row';
         restartUrlRow.innerHTML = `
@@ -4373,6 +4376,7 @@ websocket.send("FOUNDRY=dense_logs~100")
         systemContent.appendChild(restartUrlRow);
 
         // 错误重启
+        // 创建错误重启控制行，当WebSocket错误累计达到阈值时触发重启
         const errorCtrlRow = document.createElement('div');
         errorCtrlRow.className = 'feature-row';
         errorCtrlRow.innerHTML = `
@@ -4423,6 +4427,7 @@ websocket.send("FOUNDRY=dense_logs~100")
         });
 
         // 错误重启逻辑
+        // 监听错误重启开关，更新重启状态并同步旧开关控制
         errorCtrlRow.querySelector('#error-restart-toggle').addEventListener('change', (e) => {
             featureManager._loadRestartState();
             featureManager.restart.errorEnabled = !!e.target.checked;
@@ -4431,6 +4436,8 @@ websocket.send("FOUNDRY=dense_logs~100")
             toggleFeature('errorRestart', featureManager.restart.errorEnabled);
             // 启用时清零计数可选，不强制
         });
+        
+        // 监听错误阈值输入框，当发生变化时更新状态并刷新显示
         errorCtrlRow.querySelector('#error-threshold-input').addEventListener('change', (e) => {
             const val = parseInt(e.target.value);
             featureManager._loadRestartState();
@@ -4442,16 +4449,19 @@ websocket.send("FOUNDRY=dense_logs~100")
             }
             featureManager._updateRestartUI();
         });
+        // 提供重置按钮清零错误计数
         errorCtrlRow.querySelector('#error-reset-btn').addEventListener('click', () => {
             featureManager.resetWebSocketErrorCount();
         });
 
         // 定时重启逻辑
+        // 同步定时重启按钮与显示
         const syncTimerButtons = () => featureManager._updateRestartUI();
         timerCtrlRow.querySelector('#timer-restart-toggle').addEventListener('change', (e) => {
             featureManager.toggleTimedRestart(!!e.target.checked);
             syncTimerButtons();
         });
+        // 监听定时器秒数输入框变化，更新重启状态并刷新显示
         timerCtrlRow.querySelector('#timer-seconds-input').addEventListener('change', (e) => {
             const v = parseInt(e.target.value);
             featureManager._loadRestartState();
@@ -4469,6 +4479,7 @@ websocket.send("FOUNDRY=dense_logs~100")
         
 
         // 初始化UI显示与定时器
+        // 保存状态并确保UI与定时器同步
         featureManager._saveRestartState();
         featureManager._updateRestartUI();
         if (restartState.timerEnabled) {
@@ -4509,12 +4520,14 @@ websocket.send("FOUNDRY=dense_logs~100")
             </div>
         `;
         diagnosticContent.appendChild(wsMonitorRow);
+        // WS监控用于检测WebSocket关闭错误的次数与时间，辅助诊断网络问题
 
         const wsMonitorToggle = wsMonitorRow.querySelector('#ws-monitor-toggle');
         const wsMonitorResetButton = wsMonitorRow.querySelector('#ws-monitor-reset');
         const wsMonitorTotalSpan = wsMonitorRow.querySelector('#ws-monitor-total');
         const wsMonitorLastSpan = wsMonitorRow.querySelector('#ws-monitor-last');
 
+        // 格式化监控时间为可读字符串
         const formatWsMonitorTime = (timestamp) => {
             if (!timestamp) return '--';
             try {
@@ -4533,6 +4546,7 @@ websocket.send("FOUNDRY=dense_logs~100")
             }
         };
 
+        // 刷新WS监控UI显示，包括累计次数和最后发生时间
         const refreshWsMonitorUI = () => {
             try {
                 const stats = WSMonitor.getStats();
