@@ -1751,6 +1751,8 @@ websocket.send("FOUNDRY=dense_logs~100")
         _errorHandler: null,
         _rejectionHandler: null,
         _originalConsoleError: null,
+        _consoleErrorOwner: null,
+        _consoleErrorDescriptor: null,
         _throttleDelay: 10000,
         _targetSignature: 'WebSocket is already in CLOSING or CLOSED state',
 
@@ -1851,32 +1853,153 @@ websocket.send("FOUNDRY=dense_logs~100")
         _wrapConsoleError: function() {
             try {
                 if (this._originalConsoleError) return;
-                this._originalConsoleError = console.error;
-                const self = this;
-                console.error = function(...args) {
+
+                let owner = console;
+                let descriptor = Object.getOwnPropertyDescriptor(owner, 'error');
+
+                if (!descriptor) {
+                    let current = Object.getPrototypeOf(owner);
+                    while (current && !descriptor) {
+                        descriptor = Object.getOwnPropertyDescriptor(current, 'error');
+                        if (descriptor) {
+                            owner = current;
+                            break;
+                        }
+                        current = Object.getPrototypeOf(current);
+                    }
+                }
+
+                if (!descriptor) {
+                    logger.debug('【WSMonitor】未找到 console.error 描述符，跳过包装');
+                    return;
+                }
+
+                let original = null;
+                if (typeof descriptor.value === 'function') {
+                    original = descriptor.value;
+                } else if (typeof descriptor.get === 'function') {
                     try {
-                        const combined = args.map(a => String(a)).join(' ');
+                        original = descriptor.get.call(console);
+                    } catch (getErr) {
+                        logger.debug('【WSMonitor】获取 console.error 原函数失败:', getErr);
+                    }
+                }
+
+                if (typeof original !== 'function') {
+                    original = console.error;
+                }
+
+                if (typeof original !== 'function') {
+                    logger.debug('【WSMonitor】console.error 非函数，跳过包装');
+                    return;
+                }
+
+                if ('value' in descriptor && descriptor.writable === false && descriptor.configurable === false) {
+                    logger.debug('【WSMonitor】console.error 属性不可写且不可配置，跳过包装');
+                    return;
+                }
+
+                if (!('value' in descriptor) && descriptor.configurable === false) {
+                    logger.debug('【WSMonitor】console.error 描述符不可配置，跳过包装');
+                    return;
+                }
+
+                let currentOriginal = original;
+                const self = this;
+                const wrapped = function(...args) {
+                    try {
+                        const combined = args.map(arg => {
+                            try {
+                                return String(arg);
+                            } catch (_) {
+                                return '[object]';
+                            }
+                        }).join(' ');
                         if (combined.includes(self._targetSignature)) {
                             self._recordError(self._targetSignature);
                         }
-                    } catch (e) {}
-                    return self._originalConsoleError.apply(console, args);
+                    } catch (_) {}
+                    return currentOriginal.apply(console, args);
                 };
-                logger.debug('【WSMonitor】已包装 console.error');
+
+                let applied = false;
+
+                if ('value' in descriptor) {
+                    const newDescriptor = {
+                        configurable: descriptor.configurable === undefined ? true : descriptor.configurable,
+                        enumerable: descriptor.enumerable === undefined ? false : descriptor.enumerable,
+                        writable: descriptor.writable === undefined ? true : descriptor.writable,
+                        value: wrapped
+                    };
+                    Object.defineProperty(owner, 'error', newDescriptor);
+                    applied = true;
+                } else if (descriptor.get || descriptor.set) {
+                    const newDescriptor = {
+                        configurable: descriptor.configurable === undefined ? true : descriptor.configurable,
+                        enumerable: descriptor.enumerable === undefined ? false : descriptor.enumerable,
+                        get: () => wrapped
+                    };
+
+                    if (descriptor.set) {
+                        const originalSetter = descriptor.set;
+                        newDescriptor.set = function(value) {
+                            originalSetter.call(this, value);
+                            if (typeof value === 'function') {
+                                currentOriginal = value;
+                                self._originalConsoleError = value;
+                            } else if (typeof descriptor.get === 'function') {
+                                try {
+                                    const latest = descriptor.get.call(console);
+                                    if (typeof latest === 'function') {
+                                        currentOriginal = latest;
+                                        self._originalConsoleError = latest;
+                                    }
+                                } catch (_) {}
+                            }
+                        };
+                    }
+
+                    Object.defineProperty(owner, 'error', newDescriptor);
+                    applied = true;
+                }
+
+                if (applied) {
+                    this._originalConsoleError = currentOriginal;
+                    this._consoleErrorOwner = owner;
+                    this._consoleErrorDescriptor = descriptor;
+                    logger.debug('【WSMonitor】已包装 console.error');
+                } else {
+                    this._originalConsoleError = null;
+                    logger.debug('【WSMonitor】console.error 包装失败，条件不满足');
+                }
             } catch (e) {
+                this._originalConsoleError = null;
+                this._consoleErrorOwner = null;
+                this._consoleErrorDescriptor = null;
                 logger.error('【WSMonitor】包装 console.error 失败:', e);
             }
         },
 
         _restoreConsoleError: function() {
             try {
-                if (this._originalConsoleError) {
-                    console.error = this._originalConsoleError;
-                    this._originalConsoleError = null;
+                if (this._consoleErrorOwner && this._consoleErrorDescriptor) {
+                    Object.defineProperty(this._consoleErrorOwner, 'error', this._consoleErrorDescriptor);
                     logger.debug('【WSMonitor】已恢复 console.error');
+                } else if (this._originalConsoleError) {
+                    console.error = this._originalConsoleError;
+                    logger.debug('【WSMonitor】已恢复 console.error（回退方式）');
                 }
             } catch (e) {
                 logger.debug('【WSMonitor】恢复 console.error 异常:', e);
+                try {
+                    if (this._consoleErrorOwner && this._consoleErrorDescriptor && typeof this._consoleErrorDescriptor.value === 'function') {
+                        this._consoleErrorOwner.error = this._consoleErrorDescriptor.value;
+                    }
+                } catch (_) {}
+            } finally {
+                this._originalConsoleError = null;
+                this._consoleErrorOwner = null;
+                this._consoleErrorDescriptor = null;
             }
         },
 
