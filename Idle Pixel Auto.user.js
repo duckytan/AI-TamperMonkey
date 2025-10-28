@@ -202,6 +202,10 @@ websocket.send("FOUNDRY=dense_logs~100")
     };
 
     // ================ 日志管理 ================
+    /**
+     * 日志管理模块
+     * 统一控制日志输出级别和日志行为
+     */
     const logger = {
         // 日志级别
         levels: {
@@ -244,7 +248,10 @@ websocket.send("FOUNDRY=dense_logs~100")
             console.error(`${featurePrefix}[ERROR] ${message}`, ...args);
         },
 
-        // 设置日志级别
+        /**
+         * 设置日志级别
+         * @param {number|string} level - 日志级别（0-3或'DEBUG'/'INFO'/'WARN'/'ERROR'）
+         */
         setLevel: function(level) {
             if (typeof level === 'number' && level >= 0 && level <= 3) {
                 this.currentLevel = level;
@@ -276,6 +283,10 @@ websocket.send("FOUNDRY=dense_logs~100")
     logger._exposeToGlobal();
 
     // ================ 配置与状态管理 ================
+    /**
+     * 创建默认的WebSocket监控配置
+     * @returns {Object} 默认配置对象
+     */
     const createDefaultWsMonitorConfig = () => ({
         enabled: false,
         stats: {
@@ -470,6 +481,10 @@ websocket.send("FOUNDRY=dense_logs~100")
         }
     };
 
+    /**
+     * 配置管理模块
+     * 负责加载、保存和重置功能配置
+     */
     const config = {
         globalSettings: {
             logLevel: 2
@@ -914,6 +929,10 @@ websocket.send("FOUNDRY=dense_logs~100")
     };
 
     // ================ 工具函数 ================
+    /**
+     * 工具函数集合
+     * common：通用功能；dom：DOM辅助
+     */
     const utils = {
         common: {
             delay: function(ms) {
@@ -1014,6 +1033,10 @@ websocket.send("FOUNDRY=dense_logs~100")
             }
         },
 
+        /**
+         * 检查WebSocket连接状态
+         * @returns {boolean} 连接是否正常
+         */
         checkWebSocketConnection: function() {
             try {
                 return webSocketHelper.checkConnection();
@@ -1100,6 +1123,10 @@ websocket.send("FOUNDRY=dense_logs~100")
     };
 
     // ================ 元素查找器 ================
+    /**
+     * 元素查找器模块
+     * 统一管理DOM元素查找和数据提取
+     */
     const elementFinders = {
         _parseCountFromElement: function(el) {
             if (!el) return NaN;
@@ -1867,6 +1894,10 @@ websocket.send("FOUNDRY=dense_logs~100")
     };
 
     // ================ 功能管理器 ================
+    /**
+     * 功能管理器
+     * 负责执行各自动化功能、管理定时任务、处理重启逻辑等
+     */
     const featureManager = {
         // 执行矿石熔炼
         executeCopperSmelt: function() {
@@ -4153,7 +4184,7 @@ websocket.send("FOUNDRY=dense_logs~100")
         // 为每个功能创建配置行（跳过已手动添加的功能）
         Object.keys(config.features).forEach(featureKey => {
             // 跳过已手动添加的功能
-            if (featureKey === 'oilManagement' || featureKey === 'boatManagement' || featureKey === 'woodcutting' || featureKey === 'combat' || featureKey === 'errorRestart' || featureKey === 'timedRestart' || featureKey === 'refreshUrl' || featureKey === 'copperSmelt' || featureKey === 'activateFurnace' || featureKey === 'trapHarvesting' || featureKey === 'animalCollection') return; // 跳过已手动添加的
+            if (featureKey === 'oilManagement' || featureKey === 'boatManagement' || featureKey === 'woodcutting' || featureKey === 'combat' || featureKey === 'errorRestart' || featureKey === 'timedRestart' || featureKey === 'refreshUrl' || featureKey === 'copperSmelt' || featureKey === 'charcoalFoundry' || featureKey === 'activateFurnace' || featureKey === 'trapHarvesting' || featureKey === 'animalCollection') return; // 跳过已手动添加的
             const feature = config.features[featureKey];
 
             // 先添加功能描述
