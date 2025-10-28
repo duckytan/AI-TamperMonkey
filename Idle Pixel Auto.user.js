@@ -222,7 +222,7 @@ websocket.send("FOUNDRY=dense_logs~100")
         },
 
         // 当前日志级别（可配置）
-        currentLevel: 1, // WARN级别及以上，减少日志输出提高性能
+        currentLevel: 1, // 默认INFO级别，显示重要信息
 
         // 日志方法
         debug: function(message, ...args) {
