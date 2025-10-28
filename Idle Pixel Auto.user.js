@@ -30,6 +30,147 @@ v2.5 (2025-10-24)
 v2.4 (2025-10-23)
 1. 维护：同步更新脚本版本标识，便于发布管理
 2. 维护：扩充更新日志说明，方便后续追踪历史
+
+v2.3 (2025-10-22)
+1. 完善：刷新后恢复流程增加两阶段自动启动与 skipIfRunning 保护，避免重复写入配置并确保陷阱/动物/重启等模块全部恢复
+2. 修复：统一安全检查补齐陷阱收获模块，遇到禁用但仍在运行的计时器时立即回收，杜绝幽灵任务
+3. 优化：DOM 监控与日志输出增加防抖去重，显著减少页面刷新时的日志噪声
+4. 优化：重启状态加载加入异常捕获，避免单个配置损坏阻断整体初始化
+
+v2.2 (2025-10-21)
+1. 修复：刷新页面后，已勾选的 Mod 功能自动生效，无需手工再次勾选
+2. 修复：熔炼矿石启用“随机”时，下拉菜单会跟随显示当前随机到的矿石
+3. 完善：检查并补齐设置持久化，修复调试日志显示开关不保存的问题
+4. 其他：小幅优化启动与安全检查逻辑
+
+v2.1 (2025-10-20)
+1. 新增：系统分区/重启控制重写
+2. 错误重启：累计 WebSocket 错误次数，达到阈值（默认 100）触发跳转流程（非盲跳），支持手动清零计数
+3. 定时重启：支持秒数配置（默认 36000 秒），UI 显示 HH:MM:SS 倒计时，归零即触发跳转流程；支持暂停/重置，刷新后恢复
+4. 刷新网址与检测：默认 URL 预置；“刷新”按钮走统一跳转流程；“检测”按钮并行执行≥6（尽量 8）种可达性检测，显示“成功次数/总次数”
+5. 统一跳转流程：跳转前进行可达性检测，成功率≥60%才跳转；若<60%，每 10 分钟重试检测直至达标；含超时/并发保护与日志
+6. 改进：日志输出统一与防抖/去重处理，避免重复计数与并发跳转
+7. 改进：配置持久化，包含 restart.url、restart.errorEnabled、restart.errorThreshold、restart.errorCount、restart.timerEnabled、restart.timerSeconds、restart.timerRemaining
+8. 修复：修正重启相关逻辑错乱问题，避免与现有自动化功能互相干扰；Tampermonkey 环境下跨域检测采用 GM_xmlhttpRequest
+
+v2.0 (2025-10-19)
+1. 修复全局定时器中调用不存在的refreshUrl方法问题，修正为调用正确的performRedirect方法
+2. 优化重定向机制，确保在WebSocket错误或定时重启时能正确执行重定向功能
+
+v1.9 (2024-11-20)
+1. 新增获取当前矿石数量的函数elementFinders.getOreCount
+2. 优化矿石熔炼资源检查机制，新增checkResourcesSufficient函数同时检查矿石和石油数量
+3. 实现矿石熔炼随机选择功能，可自动选择有足够资源的矿石进行熔炼
+4. 在矿石熔炼UI界面增加"随机"复选框，开启后自动禁用矿石选择下拉菜单
+5. 优化配置管理，添加randomEnabled属性支持随机熔炼功能
+6. 改进资源检查日志输出，提供更详细的资源状态信息
+7. 保留向后兼容性，确保现有功能不受影响
+
+v1.8 (2024-11-19)
+1. 修复了下拉菜单选择后不显示当前值的问题，为特定下拉菜单增加宽度
+2. 实现了定时重启计时器功能，添加了倒计时自动更新逻辑
+3. 用纯CSS自定义tooltip替换了Bootstrap tooltip依赖
+4. 修复了面板宽度被硬编码覆盖的问题，增加了面板默认宽度
+5. 将"自动脚本"mod菜单按钮向上移动，提升用户体验
+6. 修复了语法错误，移除了多余的括号导致的try-catch结构问题
+7. 添加了adjustPanelSize函数，解决UI元素变化后面板大小调整问题
+8. 优化了输入框和选择框的样式，使界面更加美观和实用
+9. 提升了整个UI界面的响应性和用户体验
+
+v1.7 (2024-11-18)
+1. 统一所有功能的UI样式和CSS定义，提高代码可维护性
+2. 删除了重复的样式定义，确保每个样式只定义一次
+3. 修复了CSS语法问题，移除了没有选择器的游离CSS规则
+4. 统一了面板样式，合并了普通面板和特定面板的样式定义
+5. 统一了输入框样式，下拉菜单样式和结果显示样式
+6. 增强了样式注释，使代码结构更清晰
+7. 实现了错误重启功能，当WebSocket错误达到指定次数时自动重定向
+8. 实现了定时重启功能，支持设置时间后自动重定向到刷新网址
+9. 添加了刷新网址配置功能，为重启功能提供重定向目标
+10. 为自动重启功能添加了可视化界面，包括错误计数和倒计时显示
+
+v1.6 (2024-11-17)
+1. 新增矿石精炼数量自定义功能，用户可设置每次精炼的矿石数量
+2. 实现了石油数量自动获取和检查机制
+3. 添加了精炼所需石油和时间的计算功能
+4. 在精炼前自动检查石油是否足够，不足时跳过精炼
+5. 在矿石精炼界面添加了精炼数量输入框
+6. 优化了配置管理，支持精炼数量的本地保存和加载
+
+v1.5 (2024-11-16)
+1. 树木管理功能增强，添加"单个"和"全部"砍树方式选择
+2. 支持使用"Chop All"按钮一键砍伐所有树木
+3. 优化了树木管理的错误处理和日志输出
+
+v1.4 (2024-11-15)
+1. 新增树木管理功能
+2. 改进了UI交互体验，现在只有点击Mod按钮才会切换面板显示/隐藏状态
+3. 引入了安全点击机制，支持点击重试
+4. 改进了激活熔炉流程，使用async/await优化
+5. 增加了资源管理系统，防止内存泄漏
+6. 优化了DOM监控逻辑，只处理有意义的变化
+7. 提高了整体稳定性和错误处理能力
+8. 脚本现在应该能够在页面刷新后自动重新开始精炼矿石
+
+v1.3 (2024-11-14)
+1. 新增石油管理和渔船管理功能
+2. 优化了UI布局和交互
+3. 增加了功能启用/禁用开关
+4. 改进了错误处理和日志输出
+5. 添加了配置保存和加载功能
+
+v1.2 (2024-11-13)
+1. 新增激活熔炉功能
+2. 优化了矿石熔炼功能的稳定性
+3. 改进了元素查找逻辑
+4. 添加了更详细的日志输出
+
+v1.1 (2024-11-12)
+1. 优化了元素查找方法
+2. 增加了错误处理
+3. 改进了日志输出格式
+
+v1.0 (2024-11-11)
+1. 初始版本，实现了基本的矿石熔炼功能
+*/
+
+/*
+打开矿窑指令：
+Modals.open_furnace_dialogue()
+
+矿石熔炼指令：
+ - 矿石熔炼指令已更新为使用mod菜单中设定的值，默认10个/次
+websocket.send('SMELT=copper~10');
+websocket.send('SMELT=iron~10');
+websocket.send('SMELT=silver~10');
+websocket.send('SMELT=gold~10');
+websocket.send('SMELT=promethium~10');
+websocket.send('SMELT=titanium~10');
+websocket.send('SMELT=ancient_ore~10');
+websocket.send('SMELT=dragon_ore~10');
+websocket.send('SMELT=faradox_ore~10');
+
+打开渔船窗口指令：
+ - 每次只能派出一种渔船，不能同时派出去
+Fishing.clicks_boat('row_boat')
+Fishing.clicks_boat('canoe_boat')
+
+煤炭熔炼指令
+ - 名称对应：
+原木            logs
+柳木原木        willow_logs
+枫木原木        maple_logs
+星尘原木        stardust_logs
+红木原木        redwood_logs
+密实原木        dense_logs
+ - 炼媒指令：
+websocket.send("FOUNDRY=logs~100")
+websocket.send("FOUNDRY=willow_logs~100")
+websocket.send("FOUNDRY=maple_logs~100")
+websocket.send("FOUNDRY=stardust_logs~100")
+websocket.send("FOUNDRY=redwood_logs~100")
+websocket.send("FOUNDRY=dense_logs~100")
+
 */
 
 (function() {
@@ -217,7 +358,7 @@ v2.4 (2025-10-23)
 
     const config = {
         globalSettings: {
-            logLevel: 0
+            logLevel: 2
         },
         features: JSON.parse(JSON.stringify(defaultFeatureConfigs)),
         wsMonitor: createDefaultWsMonitorConfig(),
@@ -468,96 +609,200 @@ v2.4 (2025-10-23)
         }
     };
 
-    // ================ 工具函数 ================
-    const utils = {
-        // 安全点击函数
-        // 检查WebSocket连接状态
-        checkWebSocketConnection: function() {
+    // ================ WebSocket 工具 ================
+    const webSocketHelper = {
+        possibleSocketNames: [
+            'gameSocket', 'websocket', 'socket', 'ws',
+            'game_socket', 'connection', 'wsConnection', 'socketConnection',
+            'clientSocket', 'serverSocket', 'webSocket', 'gameConnection',
+            'idleSocket', 'pixelSocket', 'idlePixelSocket', 'gameClient',
+            'socketClient', 'wsClient', 'connectionClient', 'gameWS'
+        ],
+        gameObjectNames: ['Game', 'IdleGame', 'PixelGame', 'MainGame', 'IdlePixel'],
+        _lastSocketRef: null,
+
+        getRoots() {
+            const roots = [];
             try {
-                logger.debug('【工具函数】检查WebSocket连接状态');
+                if (typeof unsafeWindow !== 'undefined' && unsafeWindow) {
+                    roots.push(unsafeWindow);
+                }
+            } catch (e) { /* ignore */ }
+            roots.push(window);
+            return roots;
+        },
 
-                const roots = [];
-                try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) roots.push(unsafeWindow); } catch (e) {}
-                roots.push(window);
+        isValid(socket) {
+            try {
+                if (!socket || typeof socket !== 'object') return false;
+                const hasSend = typeof socket.send === 'function';
+                if (!hasSend) return false;
+                const hasReadyState = typeof socket.readyState === 'number';
+                if (!hasReadyState) return true; // 自定义对象，只要有send即可
+                return socket.readyState === 0 || socket.readyState === 1;
+            } catch (e) {
+                logger.debug('【WebSocketHelper】验证WebSocket对象时出错:', e);
+                return false;
+            }
+        },
 
-                const allPossibleSocketNames = [
-                    'gameSocket', 'websocket', 'socket', 'ws',
-                    'game_socket', 'connection', 'wsConnection', 'socketConnection',
-                    'clientSocket', 'serverSocket', 'webSocket', 'gameConnection',
-                    'idleSocket', 'pixelSocket', 'idlePixelSocket', 'gameClient',
-                    'socketClient', 'wsClient', 'connectionClient', 'gameWS'
-                ];
+        _iterateSockets(callback) {
+            const roots = this.getRoots();
+            const visited = new Set();
 
-                // 在 roots 上检查常见变量名
-                for (const root of roots) {
-                    for (const socketName of allPossibleSocketNames) {
+            const invoke = (socket, label) => {
+                if (!socket || visited.has(socket)) return false;
+                visited.add(socket);
+                if (!this.isValid(socket)) return false;
+                this._lastSocketRef = socket;
+                return callback(socket, label) === true;
+            };
+
+            if (this._lastSocketRef && this.isValid(this._lastSocketRef)) {
+                if (callback(this._lastSocketRef, '缓存socket') === true) {
+                    return true;
+                }
+            }
+
+            for (const root of roots) {
+                for (const name of this.possibleSocketNames) {
+                    try {
+                        const candidate = root[name];
+                        if (invoke(candidate, `${root === window ? 'window' : 'unsafeWindow'}.${name}`)) {
+                            return true;
+                        }
+                    } catch (e) { /* ignore */ }
+                }
+            }
+
+            for (const root of roots) {
+                for (const gameObjName of this.gameObjectNames) {
+                    try {
+                        const gameObj = root[gameObjName];
+                        if (!gameObj) continue;
+                        if (invoke(gameObj.socket, `${gameObjName}.socket`)) return true;
+                        if (invoke(gameObj.connection, `${gameObjName}.connection`)) return true;
+                        if (invoke(gameObj.ws, `${gameObjName}.ws`)) return true;
+                    } catch (e) { /* ignore */ }
+                }
+            }
+
+            for (const root of roots) {
+                try {
+                    const keys = Object.keys(root).filter(k => /(socket|ws)/i.test(k));
+                    for (const key of keys) {
                         try {
-                            const socket = root[socketName];
-                            if (this.isValidWebSocket(socket)) {
-                                logger.debug(`【工具函数】检测到可用的WebSocket连接: ${root === window ? 'window' : 'unsafeWindow'}.${socketName}`);
+                            const candidate = root[key];
+                            if (invoke(candidate, `${root === window ? 'window' : 'unsafeWindow'}['${key}']`)) {
                                 return true;
                             }
                         } catch (e) { /* ignore */ }
                     }
-                }
-
-                // 检查常见游戏对象
-                const gameObjects = ['Game', 'IdleGame', 'PixelGame', 'MainGame', 'IdlePixel'];
-                for (const root of roots) {
-                    for (const gameObjName of gameObjects) {
-                        try {
-                            const gameObj = root[gameObjName];
-                            if (!gameObj) continue;
-                            if (this.isValidWebSocket(gameObj.socket)) return true;
-                            if (this.isValidWebSocket(gameObj.connection)) return true;
-                            if (this.isValidWebSocket(gameObj.ws)) return true;
-                        } catch (e) { /* ignore */ }
-                    }
-                }
-
-                // 动态遍历可能键（名含 socket/ws）
-                for (const root of roots) {
-                    try {
-                        const keys = Object.keys(root).filter(k => /(socket|ws)/i.test(k));
-                        for (const k of keys) {
-                            try {
-                                const v = root[k];
-                                if (this.isValidWebSocket(v)) return true;
-                            } catch (e) { /* ignore */ }
-                        }
-                    } catch (e) { /* ignore */ }
-                }
-
-                // 默认允许继续（发送函数会处理失败并计数）
-                logger.debug('【工具函数】未直接检测到WebSocket连接，但将继续尝试');
-                return true;
-            } catch (e) {
-                logger.debug('【工具函数】检查WebSocket连接状态时出错:', e);
-                return true; // 默认假设连接正常，避免阻止功能
+                } catch (e) { /* ignore */ }
             }
+
+            return false;
         },
 
-        // 检查对象是否为有效的WebSocket实例
-        isValidWebSocket: function(obj) {
+        checkConnection() {
+            let found = false;
+            this._iterateSockets(() => {
+                found = true;
+                return true;
+            });
+            if (!found) {
+                logger.debug('【WebSocketHelper】未检测到可用的WebSocket连接');
+            }
+            return found;
+        },
+
+        send(message, onError) {
+            const handleError = typeof onError === 'function' ? onError : () => {};
+            logger.debug('【WebSocketHelper】准备发送消息:', message);
+
+            const trySend = (socket, label) => {
+                if (!socket || typeof socket.send !== 'function') return false;
+                try {
+                    this._lastSocketRef = socket;
+                    const hasReadyState = typeof socket.readyState === 'number';
+                    if (hasReadyState) {
+                        const state = socket.readyState;
+                        if (state === 1) {
+                            logger.info(`【WebSocket】通过${label}发送消息 (OPEN)`);
+                            socket.send(message);
+                            return true;
+                        }
+                        if (state === 0) {
+                            logger.info(`【WebSocket】连接尚未OPEN，等待open后发送 -> ${label}`);
+                            const onOpen = () => {
+                                try {
+                                    socket.send(message);
+                                    logger.info('【WebSocket】open后已发送消息');
+                                } catch (err) {
+                                    logger.error('【WebSocket】open后发送失败:', err);
+                                    handleError(err);
+                                }
+                                try {
+                                    socket.removeEventListener('open', onOpen);
+                                } catch (err) { /* ignore */ }
+                            };
+                            try {
+                                socket.addEventListener('open', onOpen);
+                            } catch (err) {
+                                try {
+                                    socket.send(message);
+                                    logger.info(`【WebSocket】自定义socket（无事件）直接发送成功 -> ${label}`);
+                                    return true;
+                                } catch (err2) {
+                                    logger.warn('【WebSocket】自定义socket直接发送失败:', err2);
+                                    handleError(err2);
+                                    return false;
+                                }
+                            }
+                            setTimeout(() => {
+                                try {
+                                    socket.removeEventListener('open', onOpen);
+                                } catch (err) { /* ignore */ }
+                            }, 5000);
+                            return true;
+                        }
+                        logger.warn(`【WebSocket】socket非OPEN/CONNECTING状态: ${state}`);
+                        if (state === 2 || state === 3) {
+                            handleError(new Error('Socket closed'));
+                        }
+                        return false;
+                    }
+                    socket.send(message);
+                    logger.info(`【WebSocket】通过${label}发送消息（无readyState，自定义socket）`);
+                    return true;
+                } catch (err) {
+                    logger.error('【WebSocket】发送失败:', err);
+                    handleError(err);
+                    return false;
+                }
+            };
+
+            let success = false;
+            this._iterateSockets((socket, label) => {
+                success = trySend(socket, label);
+                return success;
+            });
+
+            if (!success) {
+                logger.warn('【WebSocket】没有找到可用的WebSocket连接');
+            }
+            return success;
+        }
+    };
+
+    // ================ 工具函数 ================
+    const utils = {
+        checkWebSocketConnection: function() {
             try {
-                // 检查基本属性
-                if (!obj || typeof obj !== 'object') return false;
-
-                // 检查WebSocket特性
-                const hasReadyState = typeof obj.readyState === 'number';
-                const hasSendMethod = typeof obj.send === 'function';
-                const isConnected = hasReadyState && (obj.readyState === 1 || obj.readyState === 0); // CONNECTING或OPEN状态
-
-                // 检查构造函数名称（如果可用）
-                const isWebSocketConstructor = obj.constructor &&
-                                            (obj.constructor.name === 'WebSocket' ||
-                                             obj.constructor.name === 'MozWebSocket');
-
-                // 即使不是标准WebSocket对象，只要有必要的方法和状态也可以使用
-                return hasSendMethod && (hasReadyState ? isConnected : true);
+                return webSocketHelper.checkConnection();
             } catch (e) {
-                logger.debug('【工具函数】验证WebSocket对象时出错:', e);
-                return false;
+                logger.debug('【工具函数】检查WebSocket连接状态时出错:', e);
+                return true;
             }
         },
 
@@ -1997,177 +2242,13 @@ v2.4 (2025-10-23)
             }
         },
 
-        // 统一的WebSocket消息发送方法
         sendWebSocketMessage: function(message) {
-            try {
-                logger.debug('【WebSocket】准备发送消息:', message);
-
-                // 取到真实页面上下文（Tampermonkey 沙箱下优先使用 unsafeWindow）
-                const roots = [];
-                try { if (typeof unsafeWindow !== 'undefined' && unsafeWindow) roots.push(unsafeWindow); } catch (e) {}
-                roots.push(window);
-
-                // 内部发送助手：支持OPEN/CONNECTING状态，CONNECTING时等待open后再发；若无readyState但有send则直接尝试
-                const trySend = (sock, fromLabel) => {
-                    if (!sock || typeof sock.send !== 'function') return false;
-                    try {
-                        // 缓存引用，后续快速复用
-                        this._lastSocketRef = sock;
-                        const hasReadyState = typeof sock.readyState === 'number';
-                        if (hasReadyState) {
-                            const state = sock.readyState;
-                            if (state === 1) { // OPEN
-                                logger.info(`【WebSocket】通过${fromLabel}发送消息 (OPEN)`);
-                                sock.send(message);
-                                return true;
-                            }
-                            if (state === 0) { // CONNECTING
-                                logger.info(`【WebSocket】连接尚未OPEN，等待open后发送 -> ${fromLabel}`);
-                                const onOpen = () => {
-                                    try {
-                                        sock.send(message);
-                                        logger.info('【WebSocket】open后已发送消息');
-                                    } catch (err) {
-                                        logger.error('【WebSocket】open后发送失败:', err);
-                                        if (typeof this.handleWebSocketError === 'function') this.handleWebSocketError();
-                                    }
-                                    try { sock.removeEventListener('open', onOpen); } catch (e) {}
-                                };
-                                try {
-                                    sock.addEventListener('open', onOpen);
-                                } catch (e) {
-                                    // 某些自定义socket没有addEventListener，直接尝试发送
-                                    try {
-                                        sock.send(message);
-                                        logger.info(`【WebSocket】自定义socket（无事件）直接发送成功 -> ${fromLabel}`);
-                                        return true;
-                                    } catch (err2) {
-                                        logger.warn('【WebSocket】自定义socket直接发送失败:', err2);
-                                    }
-                                }
-                                // 5 秒后兜底移除监听，避免泄漏
-                                setTimeout(() => { try { sock.removeEventListener('open', onOpen); } catch (e) {} }, 5000);
-                                return true; // 视为已安排发送
-                            }
-                            logger.warn(`【WebSocket】socket非OPEN/CONNECTING状态: ${state}`);
-                            if (state === 2 || state === 3) {
-                                if (typeof this.handleWebSocketError === 'function') this.handleWebSocketError();
-                            }
-                            return false;
-                        } else {
-                            // 无readyState的自定义socket（例如框架封装），直接尝试发送
-                            try {
-                                sock.send(message);
-                                logger.info(`【WebSocket】通过${fromLabel}发送消息（无readyState，自定义socket）`);
-                                return true;
-                            } catch (err) {
-                                logger.error('【WebSocket】自定义socket发送失败:', err);
-                                if (typeof this.handleWebSocketError === 'function') this.handleWebSocketError();
-                                return false;
-                            }
-                        }
-                    } catch (e) {
-                        logger.error('【WebSocket】发送失败:', e);
-                        if (typeof this.handleWebSocketError === 'function') this.handleWebSocketError();
-                        return false;
-                    }
-                };
-
-
-                // 候选变量名
-                const allPossibleSocketNames = [
-                    'gameSocket', 'websocket', 'socket', 'ws',
-                    'game_socket', 'connection', 'wsConnection', 'socketConnection',
-                    'clientSocket', 'serverSocket', 'webSocket', 'gameConnection',
-                    'idleSocket', 'pixelSocket', 'idlePixelSocket', 'gameClient',
-                    'socketClient', 'wsClient', 'connectionClient', 'gameWS'
-                ];
-
-                // 1) 先用缓存
-                if (this._lastSocketRef && this.isValidWebSocket(this._lastSocketRef)) {
-                    const ok = trySend(this._lastSocketRef, '缓存socket');
-                    if (ok) return true;
+            const self = this;
+            return webSocketHelper.send(message, function(err) {
+                if (typeof self.handleWebSocketError === 'function') {
+                    self.handleWebSocketError();
                 }
-
-                // 2) 在 roots (unsafeWindow/window) 上查找常见变量名
-                for (const root of roots) {
-                    for (const socketName of allPossibleSocketNames) {
-                        try {
-                            const sock = root[socketName];
-                            if (sock && this.isValidWebSocket(sock)) {
-                                const label = `${root === window ? 'window' : 'unsafeWindow'}.${socketName}`;
-                                if (trySend(sock, label)) return true;
-                            }
-                        } catch (e) { /* ignore */ }
-                    }
-                }
-
-                // 3) 检查常见游戏对象上的属性（socket/connection/ws）
-                const gameObjects = ['Game', 'IdleGame', 'PixelGame', 'MainGame', 'IdlePixel'];
-                for (const root of roots) {
-                    for (const gameObjName of gameObjects) {
-                        try {
-                            const gameObj = root[gameObjName];
-                            if (!gameObj) continue;
-                            if (this.isValidWebSocket(gameObj.socket)) {
-                                if (trySend(gameObj.socket, `${gameObjName}.socket`)) return true;
-                            }
-                            if (this.isValidWebSocket(gameObj.connection)) {
-                                if (trySend(gameObj.connection, `${gameObjName}.connection`)) return true;
-                            }
-                            if (this.isValidWebSocket(gameObj.ws)) {
-                                if (trySend(gameObj.ws, `${gameObjName}.ws`)) return true;
-                            }
-                        } catch (e) { /* ignore */ }
-                    }
-                }
-
-                // 4) 动态遍历可能的全局字段（仅遍历名字里含 socket/ws 的键，减少开销）
-                for (const root of roots) {
-                    try {
-                        const keys = Object.keys(root).filter(k => /(socket|ws)/i.test(k));
-                        for (const k of keys) {
-                            try {
-                                const v = root[k];
-                                if (this.isValidWebSocket(v)) {
-                                    if (trySend(v, `${root === window ? 'window' : 'unsafeWindow'}['${k}']`)) return true;
-                                }
-                            } catch (e) { /* ignore */ }
-                        }
-                    } catch (e) { /* ignore */ }
-                }
-
-                logger.warn('【WebSocket】没有找到可用的WebSocket连接');
-                return false;
-            } catch (e) {
-                logger.error('【WebSocket】发送消息时出错:', e);
-                return false;
-            }
-        },
-
-        // 检查对象是否为有效的WebSocket实例
-        isValidWebSocket: function(obj) {
-            try {
-                // 检查基本属性
-                if (!obj || typeof obj !== 'object') return false;
-
-                // 检查WebSocket特性
-                const hasReadyState = typeof obj.readyState === 'number';
-                const hasSendMethod = typeof obj.send === 'function';
-
-                if (!hasSendMethod) {
-                    return false;
-                }
-
-                if (!hasReadyState) {
-                    return true;
-                }
-
-                return obj.readyState >= 0 && obj.readyState <= 3;
-            } catch (e) {
-                logger.debug('【WebSocket】验证WebSocket对象时出错:', e);
-                return false;
-            }
+            });
         },
 
         // 执行渔船管理
