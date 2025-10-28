@@ -357,21 +357,24 @@ websocket.send("FOUNDRY=dense_logs~100")
     };
 
     const featureMetadata = {
-        copperSmelt: { name: '矿石熔炼', prefix: '【矿石熔炼】', category: 'mining' },
-        charcoalFoundry: { name: '煤炭熔炼', prefix: '【煤炭熔炼】', category: 'mining' },
-        activateFurnace: { name: '激活熔炉', prefix: '【激活熔炉】', category: 'mining' },
-        oilManagement: { name: '石油管理', prefix: '【石油管理】', category: 'gathering' },
-        boatManagement: { name: '渔船管理', prefix: '【渔船管理】', category: 'gathering' },
-        woodcutting: { name: '树木管理', prefix: '【树木管理】', category: 'gathering' },
-        combat: { name: '自动战斗', prefix: '【自动战斗】', category: 'combat' },
-        trapHarvesting: { name: '陷阱收获', prefix: '【陷阱收获】', category: 'gathering' },
-        animalCollection: { name: '动物收集', prefix: '【动物收集】', category: 'gathering' },
-        errorRestart: { name: '错误重启', prefix: '【错误重启】', category: 'system' },
-        timedRestart: { name: '定时重启', prefix: '【定时重启】', category: 'system' },
-        refreshUrl: { name: '刷新网址', prefix: '【刷新网址】', category: 'system' }
+        copperSmelt: { name: '矿石熔炼', prefix: '【矿石熔炼】', category: 'mining', autoStart: true },
+        charcoalFoundry: { name: '煤炭熔炼', prefix: '【煤炭熔炼】', category: 'mining', autoStart: true },
+        activateFurnace: { name: '激活熔炉', prefix: '【激活熔炉】', category: 'mining', autoStart: false },
+        oilManagement: { name: '石油管理', prefix: '【石油管理】', category: 'gathering', autoStart: true },
+        boatManagement: { name: '渔船管理', prefix: '【渔船管理】', category: 'gathering', autoStart: true },
+        woodcutting: { name: '树木管理', prefix: '【树木管理】', category: 'gathering', autoStart: true },
+        combat: { name: '自动战斗', prefix: '【自动战斗】', category: 'combat', autoStart: true },
+        trapHarvesting: { name: '陷阱收获', prefix: '【陷阱收获】', category: 'gathering', autoStart: true },
+        animalCollection: { name: '动物收集', prefix: '【动物收集】', category: 'gathering', autoStart: true },
+        errorRestart: { name: '错误重启', prefix: '【错误重启】', category: 'system', autoStart: true },
+        timedRestart: { name: '定时重启', prefix: '【定时重启】', category: 'system', autoStart: true },
+        refreshUrl: { name: '刷新网址', prefix: '【刷新网址】', category: 'system', autoStart: false }
     };
 
-    const getFeatureMeta = (featureKey) => featureMetadata[featureKey] || { name: featureKey, prefix: `【${featureKey}】`, category: 'misc' };
+    const getFeatureMeta = (featureKey) => {
+        const defaults = { name: featureKey, prefix: `【${featureKey}】`, category: 'misc', autoStart: false };
+        return featureMetadata[featureKey] ? { ...defaults, ...featureMetadata[featureKey] } : defaults;
+    };
 
     const config = {
         globalSettings: {
@@ -4739,20 +4742,6 @@ websocket.send("FOUNDRY=dense_logs~100")
         logger.info('【调试系统】调试区域已初始化');
     }
 
-    const autoStartFeatureKeys = [
-        'copperSmelt',
-        'charcoalFoundry',
-        'oilManagement',
-        'boatManagement',
-        'woodcutting',
-        'combat',
-        'trapHarvesting',
-        'animalCollection',
-        'errorRestart',
-        'timedRestart'
-    ];
-
-    // 启动：在页面载入后立即根据配置启动已勾选功能，避免需要手动再次勾选
     function startEnabledFeaturesImmediately() {
         try {
             if (featureManager && typeof featureManager._loadRestartState === 'function') {
@@ -4764,6 +4753,7 @@ websocket.send("FOUNDRY=dense_logs~100")
             }
 
             const features = config.features || {};
+            const autoStartKeys = Object.keys(features).filter(key => getFeatureMeta(key).autoStart);
 
             const startFeature = (featureKey, sourceTag) => {
                 const feature = features[featureKey];
@@ -4782,7 +4772,7 @@ websocket.send("FOUNDRY=dense_logs~100")
             };
 
             const triggerStartup = (tag) => {
-                autoStartFeatureKeys.forEach(key => startFeature(key, tag));
+                autoStartKeys.forEach(key => startFeature(key, tag));
             };
 
             triggerStartup('启动恢复');
