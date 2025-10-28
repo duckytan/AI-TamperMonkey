@@ -4182,9 +4182,17 @@ websocket.send("FOUNDRY=dense_logs~100")
         combatContent.appendChild(combatRow);
 
         // 为每个功能创建配置行（跳过已手动添加的功能）
+        // 已手动添加UI的功能列表
+        const manuallyAddedFeatures = [
+            'oilManagement', 'boatManagement', 'woodcutting', 'combat',
+            'errorRestart', 'timedRestart', 'refreshUrl',
+            'copperSmelt', 'charcoalFoundry', 'activateFurnace',
+            'trapHarvesting', 'animalCollection'
+        ];
+        
         Object.keys(config.features).forEach(featureKey => {
             // 跳过已手动添加的功能
-            if (featureKey === 'oilManagement' || featureKey === 'boatManagement' || featureKey === 'woodcutting' || featureKey === 'combat' || featureKey === 'errorRestart' || featureKey === 'timedRestart' || featureKey === 'refreshUrl' || featureKey === 'copperSmelt' || featureKey === 'charcoalFoundry' || featureKey === 'activateFurnace' || featureKey === 'trapHarvesting' || featureKey === 'animalCollection') return; // 跳过已手动添加的
+            if (manuallyAddedFeatures.includes(featureKey)) return;
             const feature = config.features[featureKey];
 
             // 先添加功能描述
