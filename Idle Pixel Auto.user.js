@@ -3785,43 +3785,14 @@ websocket.send("FOUNDRY=dense_logs~100")
 
         // 石油管理功能 - 直接创建设置行，不添加单独的描述元素
 
-        // 手动添加石油管理功能设置行（强制创建，确保它一定会显示）
-        const oilRow = document.createElement('div');
-        oilRow.className = 'feature-row';
-        const oilEnabled = config.features.oilManagement && config.features.oilManagement.enabled;
-        const oilInterval = (config.features.oilManagement && config.features.oilManagement.interval || 30000) / 1000;
-
-        oilRow.innerHTML = `
-            <input type="checkbox" class="feature-checkbox" data-feature="oilManagement" ${oilEnabled ? 'checked' : ''}>
-            <span class="feature-name" title="管理石油相关功能，自动开采和处理石油资源" data-bs-toggle="tooltip" data-bs-placement="right">石油管理</span>
-            <input type="number" class="feature-interval" value="${oilInterval}" min="5" step="5">
-            <span class="interval-label">秒/次</span>
-        `;
-
-        miningContent.appendChild(oilRow);
-
-        // 绑定事件
-            oilRow.querySelector('input[data-feature="oilManagement"]').addEventListener('change', function(e) {
-                if (!config.features.oilManagement) {
-                    config.features.oilManagement = { enabled: false, interval: 30000, name: '石油管理' };
-                }
-                toggleFeature('oilManagement', e.target.checked);
-                // 功能状态变化后调整面板大小
-                setTimeout(adjustPanelSize, 0);
-            });
-
-        oilRow.querySelector('.feature-interval').addEventListener('change', function(e) {
-            if (!config.features.oilManagement) {
-                config.features.oilManagement = { enabled: false, interval: 30000, name: '石油管理' };
-            }
-            // 这里直接传入毫秒值，因为updateFeatureInterval会直接使用
-            const value = parseInt(e.target.value);
-            if (!isNaN(value) && value > 0) {
-                updateFeatureInterval('oilManagement', value * 1000);
-            } else {
-                e.target.value = oilInterval;
-            }
+        const oilRow = uiBuilder.createFeatureRow({
+            featureKey: 'oilManagement',
+            label: '石油管理',
+            tooltip: '管理石油相关功能，自动开采和处理石油资源',
+            intervalStep: 5,
+            onToggle: () => setTimeout(adjustPanelSize, 0)
         });
+        miningContent.appendChild(oilRow);
 
         // 矿石熔炼功能 - 直接创建设置行，不添加单独的描述元素
 
@@ -4012,192 +3983,94 @@ websocket.send("FOUNDRY=dense_logs~100")
 
         // 树木管理功能 - 直接创建设置行，不添加单独的描述元素
 
-        const woodRow = document.createElement('div');
-        woodRow.className = 'feature-row';
-        const woodEnabled = config.features.woodcutting && config.features.woodcutting.enabled;
-        const woodInterval = (config.features.woodcutting && config.features.woodcutting.interval || 15000) / 1000;
-        const woodMode = config.features.woodcutting && config.features.woodcutting.mode || 'single';
-
-        woodRow.innerHTML = `
-            <input type="checkbox" class="feature-checkbox" data-feature="woodcutting" ${woodEnabled ? 'checked' : ''}>
-            <span class="feature-name" title="自动管理和收获树木资源" data-bs-toggle="tooltip" data-bs-placement="right">树木管理</span>
-            <input type="number" class="feature-interval" value="${woodInterval}" min="5" step="5">
-            <span class="interval-label">秒/次</span>
-            <select class="wood-mode-select" data-feature="woodMode">
-                <option value="single" ${woodMode === 'single' ? 'selected' : ''}>单个</option>
-                <option value="all" ${woodMode === 'all' ? 'selected' : ''}>全部</option>
-            </select>
-        `;
-
+        const woodRow = uiBuilder.createFeatureRow({
+            featureKey: 'woodcutting',
+            label: '树木管理',
+            tooltip: '自动管理和收获树木资源',
+            intervalStep: 5,
+            onToggle: () => setTimeout(adjustPanelSize, 0),
+            extraFields: [
+                {
+                    html: `
+                        <select class="wood-mode-select" data-feature="woodMode">
+                            <option value="single">单个</option>
+                            <option value="all">全部</option>
+                        </select>
+                    `,
+                    selector: '.wood-mode-select',
+                    handler: (element) => {
+                        const feature = config.features.woodcutting || { mode: 'single' };
+                        element.value = feature.mode || 'single';
+                        element.addEventListener('change', (e) => {
+                            if (!config.features.woodcutting) {
+                                config.features.woodcutting = { enabled: false, interval: 15000, name: '树木管理', mode: 'single' };
+                            }
+                            config.features.woodcutting.mode = e.target.value;
+                            config.save();
+                            logger.info(`【树木管理】已选择${e.target.value === 'single' ? '单个' : '全部'}砍树方式`);
+                            setTimeout(adjustPanelSize, 0);
+                        });
+                    }
+                }
+            ]
+        });
         farmingContent.appendChild(woodRow);
-
-        // 绑定事件
-        woodRow.querySelector('input[data-feature="woodcutting"]').addEventListener('change', function(e) {
-            if (!config.features.woodcutting) {
-                config.features.woodcutting = { enabled: false, interval: 15000, name: '树木管理', mode: 'single' };
-            }
-            toggleFeature('woodcutting', e.target.checked);
-            // 功能状态变化后调整面板大小
-            setTimeout(adjustPanelSize, 0);
-        });
-
-        woodRow.querySelector('.feature-interval').addEventListener('change', function(e) {
-            if (!config.features.woodcutting) {
-                config.features.woodcutting = { enabled: false, interval: 15000, name: '树木管理', mode: 'single' };
-            }
-            // 这里直接传入毫秒值，因为updateFeatureInterval会直接使用
-            const value = parseInt(e.target.value);
-            if (!isNaN(value) && value > 0) {
-                updateFeatureInterval('woodcutting', value * 1000);
-            } else {
-                e.target.value = woodInterval;
-            }
-        });
-
-        woodRow.querySelector('.wood-mode-select').addEventListener('change', function(e) {
-            if (!config.features.woodcutting) {
-                config.features.woodcutting = { enabled: false, interval: 15000, name: '树木管理', mode: 'single' };
-            }
-            config.features.woodcutting.mode = e.target.value;
-            config.save();
-            logger.info(`【树木管理】已选择${e.target.value === 'single' ? '单个' : '全部'}砍树方式`);
-            // 模式变化后调整面板大小
-            setTimeout(adjustPanelSize, 0);
-        });
 
         // 渔船管理功能 - 直接创建设置行，不添加单独的描述元素
 
         // 手动添加渔船管理功能设置行
-        const boatRow = document.createElement('div');
-        boatRow.className = 'feature-row';
-        const boatEnabled = config.features.boatManagement && config.features.boatManagement.enabled;
-        const boatInterval = (config.features.boatManagement && config.features.boatManagement.interval || 30000) / 1000;
-        const boatSelectedBoat = (config.features.boatManagement && config.features.boatManagement.selectedBoat) || 'row_boat';
-
-        boatRow.innerHTML = `
-            <input type="checkbox" class="feature-checkbox" data-feature="boatManagement" ${boatEnabled ? 'checked' : ''}>
-            <span class="feature-name" title="自动管理渔船，收集海洋资源" data-bs-toggle="tooltip" data-bs-placement="right">渔船管理</span>
-            <input type="number" class="feature-interval" value="${boatInterval}" min="5" step="5">
-            <span class="interval-label">秒/次</span>
-            <select class="boat-type-select">
-                <option value="row_boat" ${boatSelectedBoat === 'row_boat' ? 'selected' : ''}>划艇（3小时）</option>
-                <option value="canoe_boat" ${boatSelectedBoat === 'canoe_boat' ? 'selected' : ''}>独木舟（6小时）</option>
-            </select>
-        `;
-
+        const boatRow = uiBuilder.createFeatureRow({
+            featureKey: 'boatManagement',
+            label: '渔船管理',
+            tooltip: '自动管理渔船，收集海洋资源',
+            intervalStep: 5,
+            onToggle: () => setTimeout(adjustPanelSize, 0),
+            extraFields: [
+                {
+                    html: `
+                        <select class="boat-type-select">
+                            <option value="row_boat">划艇（3小时）</option>
+                            <option value="canoe_boat">独木舟（6小时）</option>
+                        </select>
+                    `,
+                    selector: '.boat-type-select',
+                    handler: (element) => {
+                        const feature = config.features.boatManagement || { selectedBoat: 'row_boat' };
+                        element.value = feature.selectedBoat || 'row_boat';
+                        element.addEventListener('change', (e) => {
+                            if (!config.features.boatManagement) {
+                                config.features.boatManagement = { enabled: false, interval: 30000, name: '渔船管理', selectedBoat: 'row_boat' };
+                            }
+                            const val = e.target.value;
+                            if (['row_boat','canoe_boat'].includes(val)) {
+                                config.features.boatManagement.selectedBoat = val;
+                                config.save();
+                                logger.info(`【渔船管理】已选择${val === 'row_boat' ? '划艇（3小时）' : '独木舟（6小时）'}`);
+                            }
+                        });
+                    }
+                }
+            ]
+        });
         farmingContent.appendChild(boatRow);
 
-        // 绑定事件
-        boatRow.querySelector('input[data-feature="boatManagement"]').addEventListener('change', function(e) {
-            if (!config.features.boatManagement) {
-                config.features.boatManagement = { enabled: false, interval: 30000, name: '渔船管理', selectedBoat: 'row_boat' };
-            }
-            toggleFeature('boatManagement', e.target.checked);
-            // 功能状态变化后调整面板大小
-            setTimeout(adjustPanelSize, 0);
+        const trapRow = uiBuilder.createFeatureRow({
+            featureKey: 'trapHarvesting',
+            label: '陷阱收获',
+            tooltip: '自动收获陷阱捕获的资源',
+            intervalStep: 5,
+            onToggle: () => setTimeout(adjustPanelSize, 0)
         });
-
-        boatRow.querySelector('.feature-interval').addEventListener('change', function(e) {
-            if (!config.features.boatManagement) {
-                config.features.boatManagement = { enabled: false, interval: 30000, name: '渔船管理', selectedBoat: 'row_boat' };
-            }
-            // 这里直接传入毫秒值，因为updateFeatureInterval会直接使用
-            const value = parseInt(e.target.value);
-            if (!isNaN(value) && value > 0) {
-                updateFeatureInterval('boatManagement', value * 1000);
-            } else {
-                e.target.value = boatInterval;
-            }
-        });
-
-        // 渔船类型下拉
-        boatRow.querySelector('.boat-type-select').addEventListener('change', function(e) {
-            if (!config.features.boatManagement) {
-                config.features.boatManagement = { enabled: false, interval: 30000, name: '渔船管理', selectedBoat: 'row_boat' };
-            }
-            const val = e.target.value;
-            if (['row_boat','canoe_boat'].includes(val)) {
-                config.features.boatManagement.selectedBoat = val;
-                config.save();
-                logger.info(`【渔船管理】已选择${val === 'row_boat' ? '划艇（3小时）' : '独木舟（6小时）'}`);
-            }
-        });
-
-        // 陷阱收获功能 - 直接创建设置行
-        const trapRow = document.createElement('div');
-        trapRow.className = 'feature-row';
-        const trapEnabled = config.features.trapHarvesting && config.features.trapHarvesting.enabled;
-        const trapInterval = (config.features.trapHarvesting && config.features.trapHarvesting.interval || 60000) / 1000;
-
-        trapRow.innerHTML = `
-            <input type="checkbox" class="feature-checkbox" data-feature="trapHarvesting" ${trapEnabled ? 'checked' : ''}>
-            <span class="feature-name" title="自动收获陷阱捕获的资源" data-bs-toggle="tooltip" data-bs-placement="right">陷阱收获</span>
-            <input type="number" class="feature-interval" value="${trapInterval}" min="5" step="5">
-            <span class="interval-label">秒/次</span>
-        `;
-
         farmingContent.appendChild(trapRow);
 
-        // 绑定事件
-        trapRow.querySelector('input[data-feature="trapHarvesting"]').addEventListener('change', function(e) {
-            if (!config.features.trapHarvesting) {
-                config.features.trapHarvesting = { enabled: false, interval: 60000, name: '陷阱收获' };
-            }
-            toggleFeature('trapHarvesting', e.target.checked);
-            // 功能状态变化后调整面板大小
-            setTimeout(adjustPanelSize, 0);
+        const animalRow = uiBuilder.createFeatureRow({
+            featureKey: 'animalCollection',
+            label: '动物收集',
+            tooltip: '自动收集动物资源，发送COLLECT_ALL_LOOT_ANIMAL指令',
+            intervalStep: 5,
+            onToggle: () => setTimeout(adjustPanelSize, 0)
         });
-
-        trapRow.querySelector('.feature-interval').addEventListener('change', function(e) {
-            if (!config.features.trapHarvesting) {
-                config.features.trapHarvesting = { enabled: false, interval: 60000, name: '陷阱收获' };
-            }
-            // 这里直接传入毫秒值，因为updateFeatureInterval会直接使用
-            const value = parseInt(e.target.value);
-            if (!isNaN(value) && value > 0) {
-                updateFeatureInterval('trapHarvesting', value * 1000);
-            } else {
-                e.target.value = trapInterval;
-            }
-        });
-
-        // 动物收集功能 - 直接创建设置行
-        const animalRow = document.createElement('div');
-        animalRow.className = 'feature-row';
-        const animalEnabled = config.features.animalCollection && config.features.animalCollection.enabled;
-        const animalInterval = (config.features.animalCollection && config.features.animalCollection.interval || 60000) / 1000;
-
-        animalRow.innerHTML = `
-            <input type="checkbox" class="feature-checkbox" data-feature="animalCollection" ${animalEnabled ? 'checked' : ''}>
-            <span class="feature-name" title="自动收集动物资源，发送COLLECT_ALL_LOOT_ANIMAL指令" data-bs-toggle="tooltip" data-bs-placement="right">动物收集</span>
-            <input type="number" class="feature-interval" value="${animalInterval}" min="5" step="5">
-            <span class="interval-label">秒/次</span>
-        `;
-
         farmingContent.appendChild(animalRow);
-
-        // 绑定事件
-        animalRow.querySelector('input[data-feature="animalCollection"]').addEventListener('change', function(e) {
-            if (!config.features.animalCollection) {
-                config.features.animalCollection = { enabled: false, interval: 60000, name: '动物收集' };
-            }
-            toggleFeature('animalCollection', e.target.checked);
-            // 功能状态变化后调整面板大小
-            setTimeout(adjustPanelSize, 0);
-        });
-
-        animalRow.querySelector('.feature-interval').addEventListener('change', function(e) {
-            if (!config.features.animalCollection) {
-                config.features.animalCollection = { enabled: false, interval: 60000, name: '动物收集' };
-            }
-            // 这里直接传入毫秒值，因为updateFeatureInterval会直接使用
-            const value = parseInt(e.target.value);
-            if (!isNaN(value) && value > 0) {
-                updateFeatureInterval('animalCollection', value * 1000);
-            } else {
-                e.target.value = animalInterval;
-            }
-        });
 
         // 手动添加树木管理功能设置行
         logger.debug('【UI管理】石油管理功能设置行已创建:', oilRow);
@@ -4210,58 +4083,38 @@ websocket.send("FOUNDRY=dense_logs~100")
         // 自动战斗功能 - 直接创建设置行，不添加单独的描述元素
 
         // 再创建功能设置行
-        const combatRow = document.createElement('div');
-        combatRow.className = 'feature-row';
-        const combatEnabled = config.features.combat && config.features.combat.enabled;
-        const combatInterval = (config.features.combat && config.features.combat.interval || 30000) / 1000;
-        const combatSelectedArea = config.features.combat && config.features.combat.selectedArea || 'field';
-
-        combatRow.innerHTML = `
-            <input type="checkbox" class="feature-checkbox" data-feature="combat" ${combatEnabled ? 'checked' : ''}>
-            <span class="feature-name" title="自动参与战斗，击败敌人获取资源" data-bs-toggle="tooltip" data-bs-placement="right">自动战斗</span>
-            <input type="number" class="feature-interval" value="${combatInterval}" min="5" step="5">
-            <span class="interval-label">秒/次</span>
-            <select class="combat-area-select" data-feature="combatArea">
-                <option value="field" ${combatSelectedArea === 'field' ? 'selected' : ''}>田野</option>
-                <option value="forest" ${combatSelectedArea === 'forest' ? 'selected' : ''}>森林</option>
-            </select>
-        `;
-
+        const combatRow = uiBuilder.createFeatureRow({
+            featureKey: 'combat',
+            label: '自动战斗',
+            tooltip: '自动参与战斗，击败敌人获取资源',
+            intervalStep: 5,
+            onToggle: () => setTimeout(adjustPanelSize, 0),
+            extraFields: [
+                {
+                    html: `
+                        <select class="combat-area-select" data-feature="combatArea">
+                            <option value="field">田野</option>
+                            <option value="forest">森林</option>
+                        </select>
+                    `,
+                    selector: '.combat-area-select',
+                    handler: (element) => {
+                        const feature = config.features.combat || { selectedArea: 'field' };
+                        element.value = feature.selectedArea || 'field';
+                        element.addEventListener('change', (e) => {
+                            if (!config.features.combat) {
+                                config.features.combat = { enabled: false, interval: 30000, name: '自动战斗', selectedArea: 'field' };
+                            }
+                            config.features.combat.selectedArea = e.target.value;
+                            config.save();
+                            logger.info(`【自动战斗】已选择${e.target.value === 'field' ? '田野' : '森林'}区域`);
+                            setTimeout(adjustPanelSize, 0);
+                        });
+                    }
+                }
+            ]
+        });
         combatContent.appendChild(combatRow);
-
-        // 绑定事件
-        combatRow.querySelector('input[data-feature="combat"]').addEventListener('change', function(e) {
-            if (!config.features.combat) {
-                config.features.combat = { enabled: false, interval: 30000, name: '自动战斗', selectedArea: 'field' };
-            }
-            toggleFeature('combat', e.target.checked);
-            // 功能状态变化后调整面板大小
-            setTimeout(adjustPanelSize, 0);
-        });
-
-        combatRow.querySelector('.feature-interval').addEventListener('change', function(e) {
-            if (!config.features.combat) {
-                config.features.combat = { enabled: false, interval: 30000, name: '自动战斗', selectedArea: 'field' };
-            }
-            // 这里直接传入毫秒值，因为updateFeatureInterval会直接使用
-            const value = parseInt(e.target.value);
-            if (!isNaN(value) && value > 0) {
-                updateFeatureInterval('combat', value * 1000);
-            } else {
-                e.target.value = combatInterval;
-            }
-        });
-
-        combatRow.querySelector('.combat-area-select').addEventListener('change', function(e) {
-            if (!config.features.combat) {
-                config.features.combat = { enabled: false, interval: 30000, name: '自动战斗', selectedArea: 'field' };
-            }
-            config.features.combat.selectedArea = e.target.value;
-            config.save();
-            logger.info(`【自动战斗】已选择${e.target.value === 'field' ? '田野' : '森林'}区域`);
-            // 区域变化后调整面板大小
-            setTimeout(adjustPanelSize, 0);
-        });
 
         // 为每个功能创建配置行（跳过已手动添加的功能）
         Object.keys(config.features).forEach(featureKey => {
