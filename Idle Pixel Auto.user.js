@@ -30,155 +30,35 @@ v2.5 (2025-10-24)
 v2.4 (2025-10-23)
 1. 维护：同步更新脚本版本标识，便于发布管理
 2. 维护：扩充更新日志说明，方便后续追踪历史
-
-v2.3 (2025-10-22)
-1. 完善：刷新后恢复流程增加两阶段自动启动与 skipIfRunning 保护，避免重复写入配置并确保陷阱/动物/重启等模块全部恢复
-2. 修复：统一安全检查补齐陷阱收获模块，遇到禁用但仍在运行的计时器时立即回收，杜绝幽灵任务
-3. 优化：DOM 监控与日志输出增加防抖去重，显著减少页面刷新时的日志噪声
-4. 优化：重启状态加载加入异常捕获，避免单个配置损坏阻断整体初始化
-
-v2.2 (2025-10-21)
-1. 修复：刷新页面后，已勾选的 Mod 功能自动生效，无需手工再次勾选
-2. 修复：熔炼矿石启用“随机”时，下拉菜单会跟随显示当前随机到的矿石
-3. 完善：检查并补齐设置持久化，修复调试日志显示开关不保存的问题
-4. 其他：小幅优化启动与安全检查逻辑
-
-v2.1 (2025-10-20)
-1. 新增：系统分区/重启控制重写
-2. 错误重启：累计 WebSocket 错误次数，达到阈值（默认 100）触发跳转流程（非盲跳），支持手动清零计数
-3. 定时重启：支持秒数配置（默认 36000 秒），UI 显示 HH:MM:SS 倒计时，归零即触发跳转流程；支持暂停/重置，刷新后恢复
-4. 刷新网址与检测：默认 URL 预置；“刷新”按钮走统一跳转流程；“检测”按钮并行执行≥6（尽量 8）种可达性检测，显示“成功次数/总次数”
-5. 统一跳转流程：跳转前进行可达性检测，成功率≥60%才跳转；若<60%，每 10 分钟重试检测直至达标；含超时/并发保护与日志
-6. 改进：日志输出统一与防抖/去重处理，避免重复计数与并发跳转
-7. 改进：配置持久化，包含 restart.url、restart.errorEnabled、restart.errorThreshold、restart.errorCount、restart.timerEnabled、restart.timerSeconds、restart.timerRemaining
-8. 修复：修正重启相关逻辑错乱问题，避免与现有自动化功能互相干扰；Tampermonkey 环境下跨域检测采用 GM_xmlhttpRequest
-
-v2.0 (2025-10-19)
-1. 修复全局定时器中调用不存在的refreshUrl方法问题，修正为调用正确的performRedirect方法
-2. 优化重定向机制，确保在WebSocket错误或定时重启时能正确执行重定向功能
-
-v1.9 (2024-11-20)
-1. 新增获取当前矿石数量的函数elementFinders.getOreCount
-2. 优化矿石熔炼资源检查机制，新增checkResourcesSufficient函数同时检查矿石和石油数量
-3. 实现矿石熔炼随机选择功能，可自动选择有足够资源的矿石进行熔炼
-4. 在矿石熔炼UI界面增加"随机"复选框，开启后自动禁用矿石选择下拉菜单
-5. 优化配置管理，添加randomEnabled属性支持随机熔炼功能
-6. 改进资源检查日志输出，提供更详细的资源状态信息
-7. 保留向后兼容性，确保现有功能不受影响
-
-v1.8 (2024-11-19)
-1. 修复了下拉菜单选择后不显示当前值的问题，为特定下拉菜单增加宽度
-2. 实现了定时重启计时器功能，添加了倒计时自动更新逻辑
-3. 用纯CSS自定义tooltip替换了Bootstrap tooltip依赖
-4. 修复了面板宽度被硬编码覆盖的问题，增加了面板默认宽度
-5. 将"自动脚本"mod菜单按钮向上移动，提升用户体验
-6. 修复了语法错误，移除了多余的括号导致的try-catch结构问题
-7. 添加了adjustPanelSize函数，解决UI元素变化后面板大小调整问题
-8. 优化了输入框和选择框的样式，使界面更加美观和实用
-9. 提升了整个UI界面的响应性和用户体验
-
-v1.7 (2024-11-18)
-1. 统一所有功能的UI样式和CSS定义，提高代码可维护性
-2. 删除了重复的样式定义，确保每个样式只定义一次
-3. 修复了CSS语法问题，移除了没有选择器的游离CSS规则
-4. 统一了面板样式，合并了普通面板和特定面板的样式定义
-5. 统一了输入框样式，下拉菜单样式和结果显示样式
-6. 增强了样式注释，使代码结构更清晰
-7. 实现了错误重启功能，当WebSocket错误达到指定次数时自动重定向
-8. 实现了定时重启功能，支持设置时间后自动重定向到刷新网址
-9. 添加了刷新网址配置功能，为重启功能提供重定向目标
-10. 为自动重启功能添加了可视化界面，包括错误计数和倒计时显示
-
-v1.6 (2024-11-17)
-1. 新增矿石精炼数量自定义功能，用户可设置每次精炼的矿石数量
-2. 实现了石油数量自动获取和检查机制
-3. 添加了精炼所需石油和时间的计算功能
-4. 在精炼前自动检查石油是否足够，不足时跳过精炼
-5. 在矿石精炼界面添加了精炼数量输入框
-6. 优化了配置管理，支持精炼数量的本地保存和加载
-
-v1.5 (2024-11-16)
-1. 树木管理功能增强，添加"单个"和"全部"砍树方式选择
-2. 支持使用"Chop All"按钮一键砍伐所有树木
-3. 优化了树木管理的错误处理和日志输出
-
-v1.4 (2024-11-15)
-1. 新增树木管理功能
-2. 改进了UI交互体验，现在只有点击Mod按钮才会切换面板显示/隐藏状态
-3. 引入了安全点击机制，支持点击重试
-4. 改进了激活熔炉流程，使用async/await优化
-5. 增加了资源管理系统，防止内存泄漏
-6. 优化了DOM监控逻辑，只处理有意义的变化
-7. 提高了整体稳定性和错误处理能力
-8. 脚本现在应该能够在页面刷新后自动重新开始精炼矿石
-
-v1.3 (2024-11-14)
-1. 新增石油管理和渔船管理功能
-2. 优化了UI布局和交互
-3. 增加了功能启用/禁用开关
-4. 改进了错误处理和日志输出
-5. 添加了配置保存和加载功能
-
-v1.2 (2024-11-13)
-1. 新增激活熔炉功能
-2. 优化了矿石熔炼功能的稳定性
-3. 改进了元素查找逻辑
-4. 添加了更详细的日志输出
-
-v1.1 (2024-11-12)
-1. 优化了元素查找方法
-2. 增加了错误处理
-3. 改进了日志输出格式
-
-v1.0 (2024-11-11)
-1. 初始版本，实现了基本的矿石熔炼功能
-*/
-
-/*
-打开矿窑指令：
-Modals.open_furnace_dialogue()
-
-矿石熔炼指令：
- - 矿石熔炼指令已更新为使用mod菜单中设定的值，默认10个/次
-websocket.send('SMELT=copper~10');
-websocket.send('SMELT=iron~10');
-websocket.send('SMELT=silver~10');
-websocket.send('SMELT=gold~10');
-websocket.send('SMELT=promethium~10');
-websocket.send('SMELT=titanium~10');
-websocket.send('SMELT=ancient_ore~10');
-websocket.send('SMELT=dragon_ore~10');
-websocket.send('SMELT=faradox_ore~10');
-
-打开渔船窗口指令：
- - 每次只能派出一种渔船，不能同时派出去
-Fishing.clicks_boat('row_boat')
-Fishing.clicks_boat('canoe_boat')
-
-煤炭熔炼指令
- - 名称对应：
-原木            logs
-柳木原木        willow_logs
-枫木原木        maple_logs
-星尘原木        stardust_logs
-红木原木        redwood_logs
-密实原木        dense_logs
- - 炼媒指令：
-websocket.send("FOUNDRY=logs~100")
-websocket.send("FOUNDRY=willow_logs~100")
-websocket.send("FOUNDRY=maple_logs~100")
-websocket.send("FOUNDRY=stardust_logs~100")
-websocket.send("FOUNDRY=redwood_logs~100")
-websocket.send("FOUNDRY=dense_logs~100")
-
 */
 
 (function() {
     'use strict';
 
-    // 统一版本号
     const scriptVersion = '2.6';
     const featurePrefix = '【IdlePixelAuto】';
+
+    // ================ 常量定义 ================
+    const constants = {
+        ORE_TYPES: ['copper', 'iron', 'silver', 'gold', 'platinum', 'promethium', 'titanium'],
+        LOG_TYPES: {
+            logs: '原木',
+            willow_logs: '柳木原木',
+            maple_logs: '枫木原木',
+            stardust_logs: '星尘原木',
+            redwood_logs: '红木原木',
+            dense_logs: '密实原木'
+        },
+        BOAT_TYPES: ['row_boat', 'canoe_boat'],
+        COMBAT_AREAS: ['field', 'forest', 'cave', 'volcano', 'blood_field', 'blood_forest', 'blood_cave', 'blood_volcano'],
+        WOODCUTTING_MODES: ['single', 'all'],
+        WEBSOCKET_COMMANDS: {
+            SMELT: 'SMELT',
+            FOUNDRY: 'FOUNDRY',
+            CHOP_TREE_ALL: 'CHOP_TREE_ALL',
+            COLLECT_ALL_LOOT_ANIMAL: 'COLLECT_ALL_LOOT_ANIMAL'
+        }
+    };
 
     // ================ 日志管理 ================
     const logger = {
@@ -264,161 +144,111 @@ websocket.send("FOUNDRY=dense_logs~100")
         }
     });
 
-    // 配置对象，用于存储各个功能的设置
+    const defaultFeatureConfigs = {
+        copperSmelt: {
+            enabled: true,
+            interval: 30000,
+            name: '矿石熔炼',
+            selectedOre: 'copper',
+            refineCount: 10,
+            randomEnabled: false
+        },
+        charcoalFoundry: {
+            enabled: false,
+            interval: 60000,
+            name: '煤炭熔炼',
+            selectedLog: 'logs',
+            refineCount: 100,
+            randomEnabled: false
+        },
+        activateFurnace: {
+            enabled: true,
+            name: '激活熔炉'
+        },
+        oilManagement: {
+            enabled: true,
+            interval: 30000,
+            name: '石油管理'
+        },
+        boatManagement: {
+            enabled: true,
+            interval: 30000,
+            name: '渔船管理',
+            selectedBoat: 'row_boat'
+        },
+        woodcutting: {
+            enabled: true,
+            interval: 15000,
+            name: '树木管理',
+            mode: 'single'
+        },
+        combat: {
+            enabled: true,
+            interval: 30000,
+            name: '自动战斗',
+            selectedArea: 'field'
+        },
+        errorRestart: {
+            enabled: false,
+            interval: 100,
+            name: '错误重启'
+        },
+        timedRestart: {
+            enabled: false,
+            interval: 36000000,
+            name: '定时重启'
+        },
+        refreshUrl: {
+            enabled: true,
+            url: 'https://idle-pixel.com/jwt/?signature=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImR1Y2t5cyIsInRva2VuIjoicGJrZGYyX3NoYTI1NiQzMjAwMDAkTTJoVVhKV25HUXNLenRZZzFHZWJrWiR6dDM3eEZyOEtXSWlmZ3dxRHpOT3hBcjFkeDJyTzBCdm1nYllteGJGQnhNPSJ9.xc6lCaZSC-hIQw7OmGO5aTHvVUF8U79womdRqHXJ-ls',
+            name: '刷新网址'
+        },
+        trapHarvesting: {
+            enabled: false,
+            interval: 60000,
+            name: '陷阱收获'
+        },
+        animalCollection: {
+            enabled: false,
+            interval: 60000,
+            name: '动物收集'
+        }
+    };
+
     const config = {
-        // 全局设置
         globalSettings: {
-            logLevel: 0, // 默认DEBUG级别，方便调试
-            // 日志级别说明：0=DEBUG, 1=INFO, 2=WARN, 3=ERROR
+            logLevel: 0
         },
-        features: {
-            copperSmelt: {
-                enabled: true,
-                interval: 30000, // 默认1秒
-                name: '矿石熔炼',
-                selectedOre: 'copper', // 默认选择铜矿石
-                refineCount: 10 // 默认精炼数量
-            },
-            charcoalFoundry: {
-                enabled: false,
-                interval: 60000, // 默认60秒
-                name: '煤炭熔炼',
-                selectedLog: 'logs',
-                refineCount: 100,
-                randomEnabled: false
-            },
-            oilManagement: {
-                enabled: true,
-                interval: 30000, // 默认30秒
-                name: '石油管理'
-            },
-            boatManagement: {
-                enabled: true,
-                interval: 30000, // 默认30秒
-                name: '渔船管理',
-                selectedBoat: 'row_boat'
-            },
-            woodcutting: {
-                enabled: true,
-                interval: 15000, // 默认15秒
-                name: '树木管理',
-                mode: 'single' // 默认单个砍树模式
-            },
-            combat: {
-                enabled: true,
-                interval: 30000, // 默认30秒
-                name: '自动战斗',
-                selectedArea: 'field' // 默认选择田野区域
-            },
-            errorRestart: {
-                enabled: false,
-                interval: 100, // 默认100次（与规范一致）
-                name: '错误重启'
-            },
-            timedRestart: {
-                enabled: false,
-                interval: 36000000, // 默认36000秒（10小时）
-                name: '定时重启'
-            },
-            refreshUrl: {
-                enabled: true,
-                url: 'https://idle-pixel.com/jwt/?signature=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImR1Y2t5cyIsInRva2VuIjoicGJrZGYyX3NoYTI1NiQzMjAwMDAkTTJoVVhKV25HUXNLenRZZzFHZWJrWiR6dDM3eEZyOEtXSWlmZ3dxRHpOT3hBcjFkeDJyTzBCdm1nYllteGJGQnhNPSJ9.xc6lCaZSC-hIQw7OmGO5aTHvVUF8U79womdRqHXJ-ls',
-                name: '刷新网址'
-            },
-            trapHarvesting: {
-                enabled: false,
-                interval: 60000, // 默认60秒
-                name: '陷阱收获'
-            },
-            animalCollection: {
-                enabled: false,
-                interval: 60000, // 默认60秒
-                name: '动物收集'
-            }
-        },
+        features: JSON.parse(JSON.stringify(defaultFeatureConfigs)),
         wsMonitor: createDefaultWsMonitorConfig(),
 
-        // 验证配置值
         validate: function(key, value) {
             switch(key) {
                 case 'interval':
-                    // 间隔时间必须是正数且不能太小（至少100ms）
                     return typeof value === 'number' && value >= 100;
                 case 'enabled':
-                    return typeof value === 'boolean';
-                case 'selectedOre':
-                    // 矿石类型必须是有效值
-                    return ['copper', 'iron', 'silver', 'gold', 'platinum'].includes(value);
-                case 'selectedLog':
-                    return ['logs', 'willow_logs', 'maple_logs', 'stardust_logs', 'redwood_logs', 'dense_logs'].includes(value);
                 case 'randomEnabled':
                     return typeof value === 'boolean';
+                case 'selectedOre':
+                    return constants.ORE_TYPES.includes(value);
+                case 'selectedLog':
+                    return Object.keys(constants.LOG_TYPES).includes(value);
                 case 'refineCount':
-                    // 精炼数量必须是正整数
                     return typeof value === 'number' && value > 0 && value === Math.floor(value);
                 case 'selectedArea':
-                    // 战斗区域必须是有效值
-                    return ['field', 'forest', 'cave', 'volcano', 'blood_field', 'blood_forest', 'blood_cave', 'blood_volcano'].includes(value);
+                    return constants.COMBAT_AREAS.includes(value);
                 case 'mode':
-                    // 树木管理模式必须是有效值
-                    return ['single', 'all'].includes(value);
+                    return constants.WOODCUTTING_MODES.includes(value);
                 case 'selectedBoat':
-                    // 渔船类型必须是有效值
-                    return ['row_boat', 'canoe_boat'].includes(value);
+                    return constants.BOAT_TYPES.includes(value);
                 default:
-                    return true; // 其他配置项不做验证
+                    return true;
             }
         },
 
-        // 获取功能配置，包含默认值处理
         getFeatureConfig: function(featureKey) {
-            const defaultConfigs = {
-                copperSmelt: {
-                    enabled: true,
-                    interval: 30000,
-                    name: '矿石熔炼',
-                    selectedOre: 'copper',
-                    refineCount: 10 // 默认精炼数量
-                },
-                charcoalFoundry: {
-                    enabled: false,
-                    interval: 60000,
-                    name: '煤炭熔炼',
-                    selectedLog: 'logs',
-                    refineCount: 100,
-                    randomEnabled: false
-                },
-                activateFurnace: {
-                    enabled: true,
-                    name: '激活熔炉'
-                },
-                oilManagement: {
-                    enabled: true,
-                    interval: 30000,
-                    name: '石油管理'
-                },
-                boatManagement: {
-                    enabled: true,
-                    interval: 30000,
-                    name: '渔船管理',
-                    selectedBoat: 'row_boat'
-                },
-                woodcutting: {
-                    enabled: true,
-                    interval: 15000,
-                    name: '树木管理',
-                    mode: 'single'
-                },
-                combat: {
-                    enabled: true,
-                    interval: 30000,
-                    name: '自动战斗',
-                    selectedArea: 'field'
-                }
-            };
-
-            // 合并默认配置和用户配置
-            return Object.assign({}, defaultConfigs[featureKey], this.features[featureKey] || {});
+            const defaults = defaultFeatureConfigs[featureKey] || {};
+            return Object.assign({}, defaults, this.features[featureKey] || {});
         },
 
         // 保存配置到本地存储
@@ -559,50 +389,12 @@ websocket.send("FOUNDRY=dense_logs~100")
             }
         },
 
-        // 重置为默认配置
         resetToDefaults: function() {
-            // 重置全局设置
             this.globalSettings = {
-                logLevel: 2, // 默认WARN级别
-                // 日志级别说明：0=DEBUG, 1=INFO, 2=WARN, 3=ERROR
+                logLevel: 2
             };
-
-            // 重置功能配置
-            this.features = {
-                copperSmelt: {
-                    enabled: true,
-                    interval: 30000,
-                    name: '矿石熔炼',
-                    selectedOre: 'copper'
-                },
-                activateFurnace: {
-                    enabled: true,
-                    name: '激活熔炉'
-                },
-                oilManagement: {
-                    enabled: true,
-                    interval: 30000,
-                    name: '石油管理'
-                },
-                boatManagement: {
-                    enabled: true,
-                    interval: 30000,
-                    name: '渔船管理',
-                    selectedBoat: 'row_boat'
-                },
-                woodcutting: {
-                    enabled: true,
-                    interval: 15000,
-                    name: '树木管理',
-                    mode: 'single'
-                },
-                combat: {
-                    enabled: true,
-                    interval: 30000,
-                    name: '自动战斗',
-                    selectedArea: 'field'
-                }
-            };
+            this.features = JSON.parse(JSON.stringify(defaultFeatureConfigs));
+            this.wsMonitor = createDefaultWsMonitorConfig();
         }
     };
 
@@ -1710,7 +1502,7 @@ websocket.send("FOUNDRY=dense_logs~100")
             let selectedOre = config.features.copperSmelt.selectedOre || 'copper';
             const refineCount = config.features.copperSmelt.refineCount || 10;
             const isRandomEnabled = config.features.copperSmelt.randomEnabled || false;
-            const availableOres = ['copper', 'iron', 'silver', 'gold', 'platinum'];
+            const availableOres = constants.ORE_TYPES;
 
             const pickRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
             const eligible = (ore) => oreRefineHelper.checkResourcesSufficient(ore, refineCount);
@@ -1811,15 +1603,8 @@ websocket.send("FOUNDRY=dense_logs~100")
             }
 
             const featureConfig = config.features.charcoalFoundry;
-            const availableLogs = ['logs', 'willow_logs', 'maple_logs', 'stardust_logs', 'redwood_logs', 'dense_logs'];
-            const logNameMap = {
-                logs: '原木',
-                willow_logs: '柳木原木',
-                maple_logs: '枫木原木',
-                stardust_logs: '星尘原木',
-                redwood_logs: '红木原木',
-                dense_logs: '密实原木'
-            };
+            const availableLogs = Object.keys(constants.LOG_TYPES);
+            const logNameMap = constants.LOG_TYPES;
 
             let selectedLog = featureConfig.selectedLog || 'logs';
             let refineCount = parseInt(featureConfig.refineCount, 10);
