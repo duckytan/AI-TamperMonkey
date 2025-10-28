@@ -813,6 +813,31 @@ websocket.send("FOUNDRY=dense_logs~100")
                 const m = Math.floor((seconds % 3600) / 60);
                 const s = seconds % 60;
                 return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+            },
+
+            syncSelectValue: function(selector, value) {
+                try {
+                    const selectEl = document.querySelector(selector);
+                    if (selectEl) {
+                        selectEl.value = value;
+                        Array.from(selectEl.options).forEach(opt => {
+                            opt.selected = (opt.value === value);
+                        });
+                    }
+                } catch (e) {
+                    logger.debug('【工具函数】同步下拉框失败:', e);
+                }
+            },
+
+            syncInputValue: function(selector, value) {
+                try {
+                    const inputEl = document.querySelector(selector);
+                    if (inputEl) {
+                        inputEl.value = value;
+                    }
+                } catch (e) {
+                    logger.debug('【工具函数】同步输入框失败:', e);
+                }
             }
         },
 
@@ -1760,17 +1785,9 @@ websocket.send("FOUNDRY=dense_logs~100")
                     return false;
                 }
                 selectedOre = pickRandom(candidates);
-                // 同步到配置，保持UI一致
                 config.features.copperSmelt.selectedOre = selectedOre;
                 config.save();
-                // 同步下拉菜单的显示值
-                try {
-                    const oreSelectEl = document.querySelector('#auto-copper-smelt-panel .ore-select[data-feature="selectedOre"]');
-                    if (oreSelectEl) {
-                        oreSelectEl.value = selectedOre;
-                        Array.from(oreSelectEl.options).forEach(opt => opt.selected = (opt.value === selectedOre));
-                    }
-                } catch (e) { /* 忽略UI同步异常 */ }
+                utils.common.syncSelectValue('#auto-copper-smelt-panel .ore-select[data-feature="selectedOre"]', selectedOre);
                 logger.info(`【矿石熔炼】随机选择矿石: ${selectedOre}`);
             } else {
                 // 固定模式：若当前选择不足，则在其他矿石中“随机”找一个可用的
@@ -1784,17 +1801,9 @@ websocket.send("FOUNDRY=dense_logs~100")
                         return false;
                     }
                     selectedOre = pickRandom(candidates);
-                    // 同步到配置，保持UI一致
                     config.features.copperSmelt.selectedOre = selectedOre;
                     config.save();
-                    // 同步下拉菜单的显示值
-                    try {
-                        const oreSelectEl = document.querySelector('#auto-copper-smelt-panel .ore-select[data-feature="selectedOre"]');
-                        if (oreSelectEl) {
-                            oreSelectEl.value = selectedOre;
-                            Array.from(oreSelectEl.options).forEach(opt => opt.selected = (opt.value === selectedOre));
-                        }
-                    } catch (e) { /* 忽略UI同步异常 */ }
+                    utils.common.syncSelectValue('#auto-copper-smelt-panel .ore-select[data-feature="selectedOre"]', selectedOre);
                     logger.info(`【矿石熔炼】切换到可用矿石: ${selectedOre}`);
                 }
             }
@@ -1855,39 +1864,18 @@ websocket.send("FOUNDRY=dense_logs~100")
             const isRandomEnabled = !!featureConfig.randomEnabled;
             let configChanged = false;
 
-            const syncSelectValue = (value) => {
-                try {
-                    const selectEl = document.querySelector('#auto-copper-smelt-panel .charcoal-log-select[data-feature="selectedLog"]');
-                    if (selectEl) {
-                        selectEl.value = value;
-                        Array.from(selectEl.options).forEach(opt => {
-                            opt.selected = (opt.value === value);
-                        });
-                    }
-                } catch (e) { /* 忽略UI同步异常 */ }
-            };
-
-            const syncRefineInput = (value) => {
-                try {
-                    const inputEl = document.querySelector('#auto-copper-smelt-panel .charcoal-refine-count');
-                    if (inputEl) {
-                        inputEl.value = value;
-                    }
-                } catch (e) { /* 忽略UI同步异常 */ }
-            };
-
             if (!availableLogs.includes(selectedLog)) {
                 selectedLog = 'logs';
                 featureConfig.selectedLog = selectedLog;
                 configChanged = true;
-                syncSelectValue(selectedLog);
+                utils.common.syncSelectValue('#auto-copper-smelt-panel .charcoal-log-select[data-feature="selectedLog"]', selectedLog);
             }
 
             if (isRandomEnabled) {
                 selectedLog = availableLogs[Math.floor(Math.random() * availableLogs.length)];
                 featureConfig.selectedLog = selectedLog;
                 configChanged = true;
-                syncSelectValue(selectedLog);
+                utils.common.syncSelectValue('#auto-copper-smelt-panel .charcoal-log-select[data-feature="selectedLog"]', selectedLog);
                 logger.info(`【煤炭熔炼】随机选择木材: ${logNameMap[selectedLog] || selectedLog}`);
             }
 
@@ -1895,7 +1883,7 @@ websocket.send("FOUNDRY=dense_logs~100")
                 refineCount = 100;
                 featureConfig.refineCount = refineCount;
                 configChanged = true;
-                syncRefineInput(refineCount);
+                utils.common.syncInputValue('#auto-copper-smelt-panel .charcoal-refine-count', refineCount);
             }
 
             if (configChanged) {
