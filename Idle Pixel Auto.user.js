@@ -385,6 +385,7 @@ websocket.send("FOUNDRY=dense_logs~100")
                 tooltip = '',
                 hasInterval = true,
                 intervalStep = 5,
+                intervalMin = intervalStep,
                 extraFields = [],
                 onToggle,
                 onIntervalChange
@@ -404,7 +405,7 @@ websocket.send("FOUNDRY=dense_logs~100")
 
             if (hasInterval) {
                 html += `
-                    <input type="number" class="feature-interval" value="${interval}" min="${intervalStep}" step="${intervalStep}">
+                    <input type="number" class="feature-interval" value="${interval}" min="${intervalMin}" step="${intervalStep}">
                     <span class="interval-label">秒/次</span>
                 `;
             }
@@ -3796,185 +3797,196 @@ websocket.send("FOUNDRY=dense_logs~100")
 
         // 矿石熔炼功能 - 直接创建设置行，不添加单独的描述元素
 
-        const copperSmeltRow = document.createElement('div');
-        copperSmeltRow.className = 'feature-row';
-        const copperSmeltEnabled = config.features.copperSmelt && config.features.copperSmelt.enabled;
-        const copperSmeltInterval = (config.features.copperSmelt && config.features.copperSmelt.interval || 30000) / 1000;
-        const selectedOre = config.features.copperSmelt && config.features.copperSmelt.selectedOre || 'copper';
-        const refineCount = config.features.copperSmelt && config.features.copperSmelt.refineCount || 10;
+        if (!config.features.copperSmelt) {
+            config.features.copperSmelt = JSON.parse(JSON.stringify(defaultFeatureConfigs.copperSmelt));
+        }
+        const oreOptions = constants.ORE_TYPES.map(ore => {
+            const labelMap = {
+                copper: '铜',
+                iron: '铁',
+                silver: '银',
+                gold: '金',
+                platinum: '铂金',
+                promethium: '钚',
+                titanium: '钛'
+            };
+            const label = labelMap[ore] || ore;
+            return `<option value="${ore}">${label}</option>`;
+        }).join('');
 
-        copperSmeltRow.innerHTML = `
-            <input type="checkbox" class="feature-checkbox" data-feature="copperSmelt" ${copperSmeltEnabled ? 'checked' : ''}>
-            <span class="feature-name" title="自动将采集的矿石精炼成更有价值的金属" data-bs-toggle="tooltip" data-bs-placement="right">矿石熔炼</span>
-            <input type="number" class="feature-interval" value="${copperSmeltInterval}" min="5" step="5">
-            <span class="interval-label">秒/次</span>
-            <select class="ore-select" data-feature="selectedOre" ${(config.features.copperSmelt && config.features.copperSmelt.randomEnabled) ? 'disabled' : ''}>
-                <option value="copper" ${selectedOre === 'copper' ? 'selected' : ''}>铜</option>
-                <option value="iron" ${selectedOre === 'iron' ? 'selected' : ''}>铁</option>
-                <option value="silver" ${selectedOre === 'silver' ? 'selected' : ''}>银</option>
-                <option value="gold" ${selectedOre === 'gold' ? 'selected' : ''}>金</option>
-                <option value="platinum" ${selectedOre === 'platinum' ? 'selected' : ''}>铂金</option>
-            </select>
-            <label style="display: flex; align-items: center; margin-left: 10px; font-size: 12px;">
-                <input type="checkbox" class="random-ore-checkbox" data-feature="randomOre" ${(config.features.copperSmelt && config.features.copperSmelt.randomEnabled) ? 'checked' : ''}>
-                <span style="margin-left: 5px;">随机</span>
-            </label>
-            <input type="number" class="refine-count-input" value="${refineCount}" min="1" max="100" style="width: 60px; margin-left: 5px;">
-            <span class="refine-count-label" style="margin-left: 5px; font-size: 12px;">个/次</span>
-        `;
-
+        const copperSmeltRow = uiBuilder.createFeatureRow({
+            featureKey: 'copperSmelt',
+            label: '矿石熔炼',
+            tooltip: '自动将采集的矿石精炼成更有价值的金属',
+            intervalStep: 5,
+            onToggle: () => setTimeout(adjustPanelSize, 0),
+            extraFields: [
+                {
+                    html: `
+                        <select class="ore-select" data-feature="selectedOre">
+                            ${oreOptions}
+                        </select>
+                    `,
+                    selector: '.ore-select',
+                    handler: (element) => {
+                        const feature = config.features.copperSmelt || defaultFeatureConfigs.copperSmelt;
+                        element.value = feature.selectedOre || defaultFeatureConfigs.copperSmelt.selectedOre;
+                        if (feature.randomEnabled) {
+                            element.disabled = true;
+                        }
+                        element.addEventListener('change', (e) => {
+                            if (!config.features.copperSmelt) {
+                                config.features.copperSmelt = JSON.parse(JSON.stringify(defaultFeatureConfigs.copperSmelt));
+                            }
+                            config.features.copperSmelt.selectedOre = e.target.value;
+                            config.save();
+                        });
+                    }
+                },
+                {
+                    html: `
+                        <label class="random-ore-wrapper" style="display: flex; align-items: center; margin-left: 10px; font-size: 12px;">
+                            <input type="checkbox" class="random-ore-checkbox" data-feature="randomOre">
+                            <span style="margin-left: 5px;">随机</span>
+                        </label>
+                    `,
+                    selector: '.random-ore-checkbox',
+                    handler: (element, featureKey, rowEl) => {
+                        const feature = config.features.copperSmelt || defaultFeatureConfigs.copperSmelt;
+                        element.checked = !!feature.randomEnabled;
+                        const selectEl = rowEl.querySelector('.ore-select');
+                        if (selectEl) selectEl.disabled = element.checked;
+                        element.addEventListener('change', (e) => {
+                            if (!config.features.copperSmelt) {
+                                config.features.copperSmelt = JSON.parse(JSON.stringify(defaultFeatureConfigs.copperSmelt));
+                            }
+                            config.features.copperSmelt.randomEnabled = e.target.checked;
+                            config.save();
+                            if (selectEl) {
+                                selectEl.disabled = e.target.checked;
+                            }
+                            setTimeout(adjustPanelSize, 0);
+                        });
+                    }
+                },
+                {
+                    html: `
+                        <input type="number" class="refine-count-input" min="1" max="100" style="width: 60px; margin-left: 5px;">
+                        <span class="refine-count-label" style="margin-left: 5px; font-size: 12px;">个/次</span>
+                    `,
+                    selector: '.refine-count-input',
+                    handler: (element) => {
+                        const feature = config.features.copperSmelt || defaultFeatureConfigs.copperSmelt;
+                        element.value = feature.refineCount || defaultFeatureConfigs.copperSmelt.refineCount;
+                        element.addEventListener('change', (e) => {
+                            if (!config.features.copperSmelt) {
+                                config.features.copperSmelt = JSON.parse(JSON.stringify(defaultFeatureConfigs.copperSmelt));
+                            }
+                            const value = parseInt(e.target.value);
+                            if (!isNaN(value) && value >= 1 && value <= 100) {
+                                config.features.copperSmelt.refineCount = value;
+                                config.save();
+                            } else {
+                                e.target.value = config.features.copperSmelt.refineCount || defaultFeatureConfigs.copperSmelt.refineCount;
+                            }
+                        });
+                    }
+                }
+            ]
+        });
         miningContent.appendChild(copperSmeltRow);
 
-        // 绑定事件
-        copperSmeltRow.querySelector('input[data-feature="copperSmelt"]').addEventListener('change', function(e) {
-            if (!config.features.copperSmelt) {
-                config.features.copperSmelt = { enabled: false, interval: 30000, name: '矿石熔炼', selectedOre: 'copper', refineCount: 10 };
-            }
-            toggleFeature('copperSmelt', e.target.checked);
-            setTimeout(adjustPanelSize, 0);
-        });
-
-        copperSmeltRow.querySelector('.feature-interval').addEventListener('change', function(e) {
-            if (!config.features.copperSmelt) {
-                config.features.copperSmelt = { enabled: false, interval: 30000, name: '矿石熔炼', selectedOre: 'copper', refineCount: 10 };
-            }
-            const value = parseInt(e.target.value);
-            if (!isNaN(value) && value > 0) {
-                updateFeatureInterval('copperSmelt', value * 1000);
-            } else {
-                e.target.value = copperSmeltInterval;
-            }
-        });
-
-        copperSmeltRow.querySelector('.ore-select').addEventListener('change', function(e) {
-            if (!config.features.copperSmelt) {
-                config.features.copperSmelt = { enabled: false, interval: 30000, name: '矿石熔炼', selectedOre: 'copper', refineCount: 10 };
-            }
-            config.features.copperSmelt.selectedOre = e.target.value;
-            config.save();
-        });
-
-        // 绑定随机复选框事件
-        copperSmeltRow.querySelector('.random-ore-checkbox').addEventListener('change', function(e) {
-            if (!config.features.copperSmelt) {
-                config.features.copperSmelt = { enabled: false, interval: 30000, name: '矿石熔炼', selectedOre: 'copper', refineCount: 10 };
-            }
-            config.features.copperSmelt.randomEnabled = e.target.checked;
-            config.save();
-            // 更新下拉菜单的禁用状态
-            const oreSelect = copperSmeltRow.querySelector('.ore-select');
-            oreSelect.disabled = e.target.checked;
-            // 调整面板大小
-            setTimeout(adjustPanelSize, 0);
-        });
-
-        copperSmeltRow.querySelector('.refine-count-input').addEventListener('change', function(e) {
-            if (!config.features.copperSmelt) {
-                config.features.copperSmelt = { enabled: false, interval: 30000, name: '矿石熔炼', selectedOre: 'copper', refineCount: 10 };
-            }
-            const value = parseInt(e.target.value);
-            if (!isNaN(value) && value >= 1 && value <= 100) {
-                config.features.copperSmelt.refineCount = value;
-                config.save();
-            } else {
-                e.target.value = refineCount;
-            }
-        });
-
         if (!config.features.charcoalFoundry) {
-            config.features.charcoalFoundry = { enabled: false, interval: 60000, name: '煤炭熔炼', selectedLog: 'logs', refineCount: 100, randomEnabled: false };
+            config.features.charcoalFoundry = JSON.parse(JSON.stringify(defaultFeatureConfigs.charcoalFoundry));
         }
-        const charcoalConfig = config.features.charcoalFoundry;
-        const charcoalRow = document.createElement('div');
-        charcoalRow.className = 'feature-row';
-        const charcoalEnabled = charcoalConfig && charcoalConfig.enabled;
-        const charcoalInterval = ((charcoalConfig && charcoalConfig.interval) || 60000) / 1000;
-        const charcoalSelectedLog = (charcoalConfig && charcoalConfig.selectedLog) || 'logs';
-        const charcoalRandomEnabled = !!(charcoalConfig && charcoalConfig.randomEnabled);
-        const charcoalRefineCount = (charcoalConfig && charcoalConfig.refineCount) || 100;
+        const logOptions = Object.entries(constants.LOG_TYPES).map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
 
-        charcoalRow.innerHTML = `
-            <input type="checkbox" class="feature-checkbox" data-feature="charcoalFoundry" ${charcoalEnabled ? 'checked' : ''}>
-            <span class="feature-name" title="定时检测煤窑状态，空闲时自动送入木材熔炼为木炭" data-bs-toggle="tooltip" data-bs-placement="right">煤炭熔炼</span>
-            <input type="number" class="feature-interval" value="${charcoalInterval}" min="10" step="5">
-            <span class="interval-label">秒/次</span>
-            <select class="charcoal-log-select" data-feature="selectedLog" ${charcoalRandomEnabled ? 'disabled' : ''}>
-                <option value="logs" ${charcoalSelectedLog === 'logs' ? 'selected' : ''}>原木</option>
-                <option value="willow_logs" ${charcoalSelectedLog === 'willow_logs' ? 'selected' : ''}>柳木原木</option>
-                <option value="maple_logs" ${charcoalSelectedLog === 'maple_logs' ? 'selected' : ''}>枫木原木</option>
-                <option value="stardust_logs" ${charcoalSelectedLog === 'stardust_logs' ? 'selected' : ''}>星尘原木</option>
-                <option value="redwood_logs" ${charcoalSelectedLog === 'redwood_logs' ? 'selected' : ''}>红木原木</option>
-                <option value="dense_logs" ${charcoalSelectedLog === 'dense_logs' ? 'selected' : ''}>密实原木</option>
-            </select>
-            <label style="display: flex; align-items: center; margin-left: 10px; font-size: 12px;">
-                <input type="checkbox" class="charcoal-random-checkbox" data-feature="charcoalRandom" ${charcoalRandomEnabled ? 'checked' : ''}>
-                <span style="margin-left: 5px;">随机</span>
-            </label>
-            <input type="number" class="charcoal-refine-count" value="${charcoalRefineCount}" min="1" max="1000" style="width: 60px; margin-left: 5px;">
-            <span class="refine-count-label" style="margin-left: 5px; font-size: 12px;">个/次</span>
-        `;
-
+        const charcoalRow = uiBuilder.createFeatureRow({
+            featureKey: 'charcoalFoundry',
+            label: '煤炭熔炼',
+            tooltip: '定时检测煤窑状态，空闲时自动送入木材熔炼为木炭',
+            intervalStep: 5,
+            intervalMin: 10,
+            onToggle: () => setTimeout(adjustPanelSize, 0),
+            extraFields: [
+                {
+                    html: `
+                        <select class="charcoal-log-select" data-feature="selectedLog">
+                            ${logOptions}
+                        </select>
+                    `,
+                    selector: '.charcoal-log-select',
+                    handler: (element) => {
+                        const feature = config.features.charcoalFoundry || defaultFeatureConfigs.charcoalFoundry;
+                        element.value = feature.selectedLog || defaultFeatureConfigs.charcoalFoundry.selectedLog;
+                        if (feature.randomEnabled) {
+                            element.disabled = true;
+                        }
+                        element.addEventListener('change', (e) => {
+                            if (!config.features.charcoalFoundry) {
+                                config.features.charcoalFoundry = JSON.parse(JSON.stringify(defaultFeatureConfigs.charcoalFoundry));
+                            }
+                            config.features.charcoalFoundry.selectedLog = e.target.value;
+                            config.save();
+                        });
+                    }
+                },
+                {
+                    html: `
+                        <label class="charcoal-random-wrapper" style="display: flex; align-items: center; margin-left: 10px; font-size: 12px;">
+                            <input type="checkbox" class="charcoal-random-checkbox" data-feature="charcoalRandom">
+                            <span style="margin-left: 5px;">随机</span>
+                        </label>
+                    `,
+                    selector: '.charcoal-random-checkbox',
+                    handler: (element, featureKey, rowEl) => {
+                        const feature = config.features.charcoalFoundry || defaultFeatureConfigs.charcoalFoundry;
+                        element.checked = !!feature.randomEnabled;
+                        const selectEl = rowEl.querySelector('.charcoal-log-select');
+                        if (selectEl) selectEl.disabled = element.checked;
+                        element.addEventListener('change', (e) => {
+                            if (!config.features.charcoalFoundry) {
+                                config.features.charcoalFoundry = JSON.parse(JSON.stringify(defaultFeatureConfigs.charcoalFoundry));
+                            }
+                            config.features.charcoalFoundry.randomEnabled = e.target.checked;
+                            config.save();
+                            if (selectEl) {
+                                selectEl.disabled = e.target.checked;
+                                if (!e.target.checked) {
+                                    const currentValue = config.features.charcoalFoundry.selectedLog || defaultFeatureConfigs.charcoalFoundry.selectedLog;
+                                    selectEl.value = currentValue;
+                                }
+                            }
+                            setTimeout(adjustPanelSize, 0);
+                        });
+                    }
+                },
+                {
+                    html: `
+                        <input type="number" class="charcoal-refine-count" min="1" max="1000" style="width: 60px; margin-left: 5px;">
+                        <span class="refine-count-label" style="margin-left: 5px; font-size: 12px;">个/次</span>
+                    `,
+                    selector: '.charcoal-refine-count',
+                    handler: (element) => {
+                        const feature = config.features.charcoalFoundry || defaultFeatureConfigs.charcoalFoundry;
+                        element.value = feature.refineCount || defaultFeatureConfigs.charcoalFoundry.refineCount;
+                        element.addEventListener('change', (e) => {
+                            if (!config.features.charcoalFoundry) {
+                                config.features.charcoalFoundry = JSON.parse(JSON.stringify(defaultFeatureConfigs.charcoalFoundry));
+                            }
+                            const value = parseInt(e.target.value);
+                            if (!isNaN(value) && value >= 1 && value <= 1000) {
+                                config.features.charcoalFoundry.refineCount = value;
+                                config.save();
+                            } else {
+                                e.target.value = config.features.charcoalFoundry.refineCount || defaultFeatureConfigs.charcoalFoundry.refineCount;
+                            }
+                        });
+                    }
+                }
+            ]
+        });
         miningContent.appendChild(charcoalRow);
-
-        charcoalRow.querySelector('input[data-feature="charcoalFoundry"]').addEventListener('change', function(e) {
-            if (!config.features.charcoalFoundry) {
-                config.features.charcoalFoundry = { enabled: false, interval: 60000, name: '煤炭熔炼', selectedLog: 'logs', refineCount: 100, randomEnabled: false };
-            }
-            toggleFeature('charcoalFoundry', e.target.checked);
-            setTimeout(adjustPanelSize, 0);
-        });
-
-        charcoalRow.querySelector('.feature-interval').addEventListener('change', function(e) {
-            if (!config.features.charcoalFoundry) {
-                config.features.charcoalFoundry = { enabled: false, interval: 60000, name: '煤炭熔炼', selectedLog: 'logs', refineCount: 100, randomEnabled: false };
-            }
-            const value = parseInt(e.target.value);
-            if (!isNaN(value) && value > 0) {
-                updateFeatureInterval('charcoalFoundry', value * 1000);
-            } else {
-                const currentInterval = (config.features.charcoalFoundry && config.features.charcoalFoundry.interval || 60000) / 1000;
-                e.target.value = currentInterval;
-            }
-        });
-
-        charcoalRow.querySelector('.charcoal-log-select').addEventListener('change', function(e) {
-            if (!config.features.charcoalFoundry) {
-                config.features.charcoalFoundry = { enabled: false, interval: 60000, name: '煤炭熔炼', selectedLog: 'logs', refineCount: 100, randomEnabled: false };
-            }
-            config.features.charcoalFoundry.selectedLog = e.target.value;
-            config.save();
-        });
-
-        charcoalRow.querySelector('.charcoal-random-checkbox').addEventListener('change', function(e) {
-            if (!config.features.charcoalFoundry) {
-                config.features.charcoalFoundry = { enabled: false, interval: 60000, name: '煤炭熔炼', selectedLog: 'logs', refineCount: 100, randomEnabled: false };
-            }
-            config.features.charcoalFoundry.randomEnabled = e.target.checked;
-            config.save();
-            const logSelect = charcoalRow.querySelector('.charcoal-log-select');
-            logSelect.disabled = e.target.checked;
-            if (!e.target.checked) {
-                const currentValue = config.features.charcoalFoundry.selectedLog || 'logs';
-                logSelect.value = currentValue;
-                Array.from(logSelect.options).forEach(opt => {
-                    opt.selected = (opt.value === currentValue);
-                });
-            }
-            setTimeout(adjustPanelSize, 0);
-        });
-
-        charcoalRow.querySelector('.charcoal-refine-count').addEventListener('change', function(e) {
-            if (!config.features.charcoalFoundry) {
-                config.features.charcoalFoundry = { enabled: false, interval: 60000, name: '煤炭熔炼', selectedLog: 'logs', refineCount: 100, randomEnabled: false };
-            }
-            const value = parseInt(e.target.value);
-            if (!isNaN(value) && value >= 1 && value <= 1000) {
-                config.features.charcoalFoundry.refineCount = value;
-                config.save();
-            } else {
-                e.target.value = config.features.charcoalFoundry.refineCount || 100;
-            }
-        });
 
         // 2. 种植收集分区
         const farmingSection = createSectionTitle('种植收集');
