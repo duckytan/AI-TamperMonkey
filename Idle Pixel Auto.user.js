@@ -377,7 +377,25 @@ websocket.send("FOUNDRY=dense_logs~100")
     };
 
     // ================ UI 构建工具 ================
+    /**
+     * UI构建工具模块
+     * 提供统一的UI元素创建方法，减少重复代码
+     */
     const uiBuilder = {
+        /**
+         * 创建功能行
+         * @param {Object} options - 配置选项
+         * @param {string} options.featureKey - 功能键名
+         * @param {string} options.label - 功能显示名称
+         * @param {string} [options.tooltip=''] - 悬停提示文本
+         * @param {boolean} [options.hasInterval=true] - 是否显示间隔时间输入框
+         * @param {number} [options.intervalStep=5] - 间隔时间步长
+         * @param {number} [options.intervalMin] - 间隔时间最小值
+         * @param {Array} [options.extraFields=[]] - 额外的自定义字段
+         * @param {Function} [options.onToggle] - 开关切换回调函数
+         * @param {Function} [options.onIntervalChange] - 间隔变化回调函数
+         * @returns {HTMLElement} 功能行DOM元素
+         */
         createFeatureRow: function(options) {
             const {
                 featureKey,
@@ -706,6 +724,10 @@ websocket.send("FOUNDRY=dense_logs~100")
     };
 
     // ================ WebSocket 工具 ================
+    /**
+     * WebSocket辅助模块
+     * 统一管理WebSocket连接的查找、验证和消息发送
+     */
     const webSocketHelper = {
         possibleSocketNames: [
             'gameSocket', 'websocket', 'socket', 'ws',
