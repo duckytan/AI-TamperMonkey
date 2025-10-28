@@ -797,6 +797,80 @@ websocket.send("FOUNDRY=dense_logs~100")
 
     // ================ 工具函数 ================
     const utils = {
+        common: {
+            delay: function(ms) {
+                return new Promise(resolve => setTimeout(resolve, ms));
+            },
+
+            parseNumber: function(text) {
+                if (!text) return NaN;
+                const cleaned = text.toString().replace(/,/g, '').trim();
+                return parseInt(cleaned, 10);
+            },
+
+            formatTime: function(seconds) {
+                const h = Math.floor(seconds / 3600);
+                const m = Math.floor((seconds % 3600) / 60);
+                const s = seconds % 60;
+                return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+            }
+        },
+
+        dom: {
+            findByText: function(textToFind) {
+                const results = [];
+                function searchElements(node) {
+                    if (node.nodeType === Node.TEXT_NODE) {
+                        if (node.textContent && node.textContent.includes(textToFind)) {
+                            if (!results.includes(node.parentNode)) {
+                                results.push(node.parentNode);
+                            }
+                        }
+                    } else if (node.nodeType === Node.ELEMENT_NODE) {
+                        if (node.textContent && node.textContent.includes(textToFind)) {
+                            results.push(node);
+                        }
+                        const children = node.childNodes;
+                        if (children && children.length > 0) {
+                            for (let i = 0; i < children.length; i++) {
+                                searchElements(children[i]);
+                            }
+                        }
+                    }
+                }
+                searchElements(document.body);
+                if (results.length === 0) {
+                    logger.debug(`【DOM工具】未找到包含文本 "${textToFind}" 的元素`);
+                }
+                return results;
+            },
+
+            waitForElement: function(selector, timeout = 5000) {
+                return new Promise((resolve, reject) => {
+                    const element = document.querySelector(selector);
+                    if (element) {
+                        resolve(element);
+                        return;
+                    }
+                    const observer = new MutationObserver((mutations, obs) => {
+                        const element = document.querySelector(selector);
+                        if (element) {
+                            obs.disconnect();
+                            resolve(element);
+                        }
+                    });
+                    observer.observe(document.body, {
+                        childList: true,
+                        subtree: true
+                    });
+                    setTimeout(() => {
+                        observer.disconnect();
+                        reject(new Error(`等待元素 ${selector} 超时`));
+                    }, timeout);
+                });
+            }
+        },
+
         checkWebSocketConnection: function() {
             try {
                 return webSocketHelper.checkConnection();
@@ -806,10 +880,8 @@ websocket.send("FOUNDRY=dense_logs~100")
             }
         },
 
-        // 暂停所有定时任务
         pauseAllTasks: function() {
             logger.warn('【工具函数】暂停所有定时任务，等待WebSocket连接恢复');
-            // 尝试暂停各种定时任务
             if (window.pauseAutoTasks) {
                 try {
                     window.pauseAutoTasks();
@@ -882,58 +954,23 @@ websocket.send("FOUNDRY=dense_logs~100")
             }
         },
 
-        // 延迟执行函数
-        delay: function(ms) {
-            logger.debug(`【工具函数】设置延迟 ${ms}ms`);
-            return new Promise(resolve => setTimeout(resolve, ms));
-        },
-
-        // 辅助函数：根据文本内容查找元素
-        findElementsByTextContent: function(textToFind) {
-            const results = [];
-
-            // 递归查找所有元素
-            function searchElements(node) {
-                if (node.nodeType === Node.TEXT_NODE) {
-                    if (node.textContent && node.textContent.includes(textToFind)) {
-                        // 添加父元素到结果
-                        if (!results.includes(node.parentNode)) {
-                            results.push(node.parentNode);
-                        }
-                    }
-                } else if (node.nodeType === Node.ELEMENT_NODE) {
-                    // 检查元素的textContent
-                    if (node.textContent && node.textContent.includes(textToFind)) {
-                        results.push(node);
-                    }
-
-                    // 递归搜索子节点
-                    const children = node.childNodes;
-                    if (children && children.length > 0) {
-                        for (let i = 0; i < children.length; i++) {
-                            searchElements(children[i]);
-                        }
-                    }
-                }
-            }
-
-            // 开始搜索
-            searchElements(document.body);
-
-            // 仅在结果为空时输出日志，避免过多输出
-            if (results.length === 0) {
-                logger.debug(`【工具函数】未找到包含文本 "${textToFind}" 的元素`);
-            } else {
-                logger.debug(`【工具函数】找到 ${results.length} 个包含文本 "${textToFind}" 的元素`);
-            }
-
-            return results;
-        }
     };
 
     // ================ 元素查找器 ================
     const elementFinders = {
-        // 查找矿石熔炼按钮
+        _parseCountFromElement: function(el) {
+            if (!el) return NaN;
+            const text = (el.textContent || el.value || '').toString();
+            return utils.common.parseNumber(text);
+        },
+
+        _findByDataKey: function(key) {
+            let el = document.querySelector(`item-display[data-key="${key}"]`);
+            if (el) return el;
+            el = document.querySelector(`[data-key="${key}"]`);
+            return el || null;
+        },
+
         findSmeltButton: function() {
             const selectedOre = config.features.copperSmelt.selectedOre || 'copper';
 
@@ -1041,42 +1078,28 @@ websocket.send("FOUNDRY=dense_logs~100")
         // 查找石油数值
         findOilValues: function() {
             try {
-                // 查找石油当前值
-                const currentOilElement = document.querySelector('item-display[data-key="oil"]');
-                const maxOilElement = document.querySelector('item-display[data-key="max_oil"]');
+                const currentOilElement = this._findByDataKey('oil');
+                const maxOilElement = this._findByDataKey('max_oil');
 
                 if (currentOilElement && maxOilElement) {
-                    // 移除逗号等格式字符，转换为数字
-                    const currentOil = parseInt(currentOilElement.textContent.replace(/,/g, ''));
-                    const maxOil = parseInt(maxOilElement.textContent.replace(/,/g, ''));
+                    const currentOil = this._parseCountFromElement(currentOilElement);
+                    const maxOil = this._parseCountFromElement(maxOilElement);
 
-                    logger.debug('【元素查找】成功获取石油数值:', { current: currentOil, max: maxOil });
-                    return {
-                        current: currentOil,
-                        max: maxOil
-                    };
-                } else {
-                    logger.debug('【元素查找】未找到石油数值元素');
+                    if (!isNaN(currentOil) && !isNaN(maxOil)) {
+                        logger.debug('【元素查找】成功获取石油数值:', { current: currentOil, max: maxOil });
+                        return { current: currentOil, max: maxOil };
+                    }
                 }
+                logger.debug('【元素查找】未找到石油数值元素');
             } catch (e) {
                 logger.error('【元素查找】查找石油数值时出错:', e);
             }
-
             return null;
         },
 
         // 获取指定类型矿石的数量（兼容新旧DOM结构）
         getOreCount: function(oreType) {
             try {
-                const parseCountFromEl = (el) => {
-                    if (!el) return NaN;
-                    const raw = (el.textContent || el.value || '').toString().replace(/,/g, '').trim();
-                    const n = parseInt(raw);
-                    return isNaN(n) ? NaN : n;
-                };
-
-                // 兼容多种键名：新结构直接用 ore 名称；旧结构带 _ore 后缀
-                // 同时为安全起见保留原 oreType 自身与 `${oreType}_ore` 两种尝试
                 const aliasMap = {
                     copper: ['copper', 'copper_ore'],
                     iron: ['iron', 'iron_ore'],
@@ -1087,40 +1110,24 @@ websocket.send("FOUNDRY=dense_logs~100")
                 };
                 const keys = aliasMap[oreType] || [oreType, `${oreType}_ore`];
 
-                // 1) 优先使用新结构：item-display[data-key="<key>"]
                 for (const key of keys) {
-                    const el = document.querySelector(`item-display[data-key="${key}"]`);
+                    const el = this._findByDataKey(key);
                     if (el) {
-                        const n = parseCountFromEl(el);
-                        if (!isNaN(n)) {
-                            logger.debug(`【元素查找】通过 item-display[data-key="${key}"] 获取 ${oreType} 数量: ${n}`);
-                            return n;
-                        } else {
-                            logger.debug(`【元素查找】item-display[data-key="${key}"] 文本无法解析为数字: "${el.textContent}"`);
+                        const count = this._parseCountFromElement(el);
+                        if (!isNaN(count)) {
+                            logger.debug(`【元素查找】通过 data-key="${key}" 获取 ${oreType} 数量: ${count}`);
+                            return count;
                         }
                     }
                 }
 
-                // 2) 退化为任意 [data-key="<key>"]（部分页面用法不含自定义标签）
-                for (const key of keys) {
-                    const el = document.querySelector(`[data-key="${key}"]`);
-                    if (el) {
-                        const n = parseCountFromEl(el);
-                        if (!isNaN(n)) {
-                            logger.debug(`【元素查找】通过 [data-key="${key}"] 获取 ${oreType} 数量: ${n}`);
-                            return n;
-                        }
-                    }
-                }
-
-                // 3) 再次回退：从 itembox[data-item="<ore>"] 容器内部提取
                 const box = document.querySelector(`itembox[data-item="${oreType}"]`) || document.querySelector(`itembox[data-item="${keys[0]}"]`);
                 if (box) {
                     const inner = box.querySelector('item-display') || box.querySelector('[data-key]');
-                    const n = parseCountFromEl(inner);
-                    if (!isNaN(n)) {
-                        logger.debug(`【元素查找】通过 itembox[data-item="${box.getAttribute('data-item')}"] 内部获取 ${oreType} 数量: ${n}`);
-                        return n;
+                    const count = this._parseCountFromElement(inner);
+                    if (!isNaN(count)) {
+                        logger.debug(`【元素查找】通过 itembox[data-item="${box.getAttribute('data-item')}"] 获取 ${oreType} 数量: ${count}`);
+                        return count;
                     }
                 }
 
@@ -1244,46 +1251,38 @@ websocket.send("FOUNDRY=dense_logs~100")
             return null;
         },
 
-        // 查找能量值
         findEnergyValue: function() {
             try {
-                // 查找能量显示元素
-                const energyElement = document.querySelector('item-display[data-key="energy"]');
-                if (energyElement) {
-                    const energyText = energyElement.textContent.replace(/,/g, '').trim();
-                    const energy = parseInt(energyText);
-                    if (!isNaN(energy)) {
-                        logger.debug('【元素查找】成功找到能量值:', energy);
-                        return energy;
+                const el = this._findByDataKey('energy');
+                if (el) {
+                    const value = this._parseCountFromElement(el);
+                    if (!isNaN(value)) {
+                        logger.debug('【元素查找】成功找到能量值:', value);
+                        return value;
                     }
                 }
                 logger.debug('【元素查找】未找到有效能量值');
-                return null;
             } catch (e) {
                 logger.error('【元素查找】查找能量值时出错:', e);
-                return null;
             }
+            return null;
         },
 
-        // 查找战斗点数
         findFightPointsValue: function() {
             try {
-                // 查找战斗点数显示元素
-                const fightPointsElement = document.querySelector('item-display[data-key="fight_points"]');
-                if (fightPointsElement) {
-                    const fightPointsText = fightPointsElement.textContent.replace(/,/g, '').trim();
-                    const fightPoints = parseInt(fightPointsText);
-                    if (!isNaN(fightPoints)) {
-                        logger.debug('【元素查找】成功找到战斗点数:', fightPoints);
-                        return fightPoints;
+                const el = this._findByDataKey('fight_points');
+                if (el) {
+                    const value = this._parseCountFromElement(el);
+                    if (!isNaN(value)) {
+                        logger.debug('【元素查找】成功找到战斗点数:', value);
+                        return value;
                     }
                 }
                 logger.debug('【元素查找】未找到有效战斗点数');
-                return null;
             } catch (e) {
                 logger.error('【元素查找】查找战斗点数时出错:', e);
-                return null;
             }
+            return null;
         },
 
         // 查找快速战斗按钮
