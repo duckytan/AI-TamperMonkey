@@ -356,6 +356,23 @@ websocket.send("FOUNDRY=dense_logs~100")
         }
     };
 
+    const featureMetadata = {
+        copperSmelt: { name: '矿石熔炼', prefix: '【矿石熔炼】', category: 'mining' },
+        charcoalFoundry: { name: '煤炭熔炼', prefix: '【煤炭熔炼】', category: 'mining' },
+        activateFurnace: { name: '激活熔炉', prefix: '【激活熔炉】', category: 'mining' },
+        oilManagement: { name: '石油管理', prefix: '【石油管理】', category: 'gathering' },
+        boatManagement: { name: '渔船管理', prefix: '【渔船管理】', category: 'gathering' },
+        woodcutting: { name: '树木管理', prefix: '【树木管理】', category: 'gathering' },
+        combat: { name: '自动战斗', prefix: '【自动战斗】', category: 'combat' },
+        trapHarvesting: { name: '陷阱收获', prefix: '【陷阱收获】', category: 'gathering' },
+        animalCollection: { name: '动物收集', prefix: '【动物收集】', category: 'gathering' },
+        errorRestart: { name: '错误重启', prefix: '【错误重启】', category: 'system' },
+        timedRestart: { name: '定时重启', prefix: '【定时重启】', category: 'system' },
+        refreshUrl: { name: '刷新网址', prefix: '【刷新网址】', category: 'system' }
+    };
+
+    const getFeatureMeta = (featureKey) => featureMetadata[featureKey] || { name: featureKey, prefix: `【${featureKey}】`, category: 'misc' };
+
     const config = {
         globalSettings: {
             logLevel: 2
@@ -3100,16 +3117,9 @@ websocket.send("FOUNDRY=dense_logs~100")
     setInterval(ensureWebSocketErrorListeners, 30000);
 
 
-    // 更新功能间隔时间
     function updateFeatureInterval(featureKey, interval) {
-        const featurePrefix = featureKey === 'copperSmelt' ? '【矿石熔炼】' :
-                             featureKey === 'charcoalFoundry' ? '【煤炭熔炼】' :
-                             featureKey === 'oilManagement' ? '【石油管理】' :
-                             featureKey === 'boatManagement' ? '【渔船管理】' :
-                             featureKey === 'woodcutting' ? '【树木管理】' :
-                             featureKey === 'combat' ? '【自动战斗】' : '';
-
-        logger.info(`${featurePrefix}更新功能间隔时间: ${interval}ms`);
+        const meta = getFeatureMeta(featureKey);
+        logger.info(`${meta.prefix}更新功能间隔时间: ${interval}ms`);
 
         const feature = config.features[featureKey];
         if (feature) {
@@ -3117,18 +3127,17 @@ websocket.send("FOUNDRY=dense_logs~100")
             // 使用功能原有的interval值作为默认值，而不是硬编码的1000ms
             const newInterval = parseInt(interval) || feature.interval || 1000;
 
-            logger.info(`${featurePrefix}间隔时间已更新为${newInterval}ms`);
+            logger.info(`${meta.prefix}间隔时间已更新为${newInterval}ms`);
             feature.interval = newInterval;
             config.save();
-            logger.debug(`${featurePrefix}间隔配置已保存`);
+            logger.debug(`${meta.prefix}间隔配置已保存`);
 
-            // 如果功能已启用，先停止当前运行的功能，然后由安全检查定时器自动重新启动
             if (feature.enabled && (featureKey === 'copperSmelt' || featureKey === 'charcoalFoundry' || featureKey === 'oilManagement' ||
                 featureKey === 'boatManagement' || featureKey === 'woodcutting' ||
                 featureKey === 'combat')) {
-                logger.info(`${featurePrefix}停止当前运行的功能，等待安全检查定时器应用新间隔后重启`);
+                logger.info(`${meta.prefix}停止当前运行的功能，等待安全检查定时器应用新间隔后重启`);
                 featureManager.stopFeature(featureKey);
-                logger.debug(`${featurePrefix}功能已停止，新间隔将在下一次安全检查时应用`);
+                logger.debug(`${meta.prefix}功能已停止，新间隔将在下一次安全检查时应用`);
             }
         }
     }
