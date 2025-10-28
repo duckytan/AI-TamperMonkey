@@ -2334,93 +2334,57 @@ websocket.send("FOUNDRY=dense_logs~100")
             }
         },
 
-        // 开始定时功能
+        _featureExecutors: {
+            copperSmelt: function() { featureManager.executeCopperSmelt(); },
+            charcoalFoundry: function() { featureManager.executeCharcoalFoundry(); },
+            oilManagement: function() { featureManager.executeOilManagement(); },
+            boatManagement: function() { featureManager.executeBoatManagement(); },
+            woodcutting: function() { featureManager.executeWoodcutting(); },
+            combat: function() { featureManager.executeCombat(); },
+            trapHarvesting: function() { featureManager.executeTrapHarvesting(); },
+            animalCollection: function() { featureManager.executeAnimalCollection(); },
+            errorRestart: function() { featureManager.resetWebSocketErrorCount(); },
+            timedRestart: function() { featureManager.toggleTimedRestart(config.features.timedRestart.enabled); }
+        },
+
         startTimedFeature: function(featureName, interval) {
-            const featurePrefix = featureName === 'copperSmelt' ? '【矿石熔炼】' :
-                                 featureName === 'charcoalFoundry' ? '【煤炭熔炼】' :
-                                 featureName === 'oilManagement' ? '【石油管理】' :
-                                 featureName === 'boatManagement' ? '【渔船管理】' :
-                                 featureName === 'woodcutting' ? '【树木管理】' :
-                                 featureName === 'combat' ? '【自动战斗】' :
-                                 featureName === 'trapHarvesting' ? '【陷阱收获】' :
-                                 featureName === 'animalCollection' ? '【动物收集】' : '';
+            const meta = getFeatureMeta(featureName);
+            const validInterval = Math.max(parseInt(interval) || 1000, 1000);
+            logger.info(`${meta.prefix}功能启动，请求间隔: ${interval}ms，实际使用间隔: ${validInterval}ms`);
 
-            // 验证interval参数有效性，防止设置过小或无效的间隔
-            const validInterval = Math.max(parseInt(interval) || 1000, 1000); // 最小1000ms
-            logger.info(`${featurePrefix}功能启动，请求间隔: ${interval}ms，实际使用间隔: ${validInterval}ms`);
-
-            // 停止现有的定时器
             if (timers[featureName]) {
-                logger.debug(`${featurePrefix}停止现有定时器`);
+                logger.debug(`${meta.prefix}停止现有定时器`);
                 clearInterval(timers[featureName]);
                 timers[featureName] = null;
             }
 
-            // 延迟执行以确保WebSocket连接就绪
+            const executor = this._featureExecutors[featureName];
+            if (!executor) {
+                logger.warn(`${meta.prefix}未找到执行器，跳过启动`);
+                return;
+            }
+
             const delayTimer = setTimeout(() => {
-                logger.debug(`${featurePrefix}延迟执行开始`);
-
-                // 立即执行一次
+                logger.debug(`${meta.prefix}延迟执行开始`);
                 try {
-                    if (featureName === 'copperSmelt') {
-                        this.executeCopperSmelt();
-                    } else if (featureName === 'charcoalFoundry') {
-                        this.executeCharcoalFoundry();
-                    } else if (featureName === 'oilManagement') {
-                        this.executeOilManagement();
-                    } else if (featureName === 'boatManagement') {
-                        this.executeBoatManagement();
-                    } else if (featureName === 'woodcutting') {
-                        this.executeWoodcutting();
-                    } else if (featureName === 'combat') {
-                        this.executeCombat();
-                    } else if (featureName === 'trapHarvesting') {
-                        this.executeTrapHarvesting();
-                    } else if (featureName === 'animalCollection') {
-                        this.executeAnimalCollection();
-                    } else if (featureName === 'errorRestart') {
-                        // 错误重启初始化
-                        this.resetWebSocketErrorCount();
-                    } else if (featureName === 'timedRestart') {
-                        // 定时重启初始化
-                        this.toggleTimedRestart(config.features.timedRestart.enabled);
-                    }
+                    executor();
                 } catch (e) {
-                    logger.error(`${featurePrefix}执行功能时出错:`, e);
+                    logger.error(`${meta.prefix}执行功能时出错:`, e);
                 }
-            }, 1000); // 1秒延迟
+            }, 1000);
 
-            // 保存延迟定时器引用以便清理
             if (!cleanupResources.timeouts) cleanupResources.timeouts = [];
             cleanupResources.timeouts.push(delayTimer);
 
-            // 设置定时器（使用验证后的有效间隔）
             timers[featureName] = setInterval(() => {
                 try {
-                    // 尝试执行功能
-                    if (featureName === 'copperSmelt') {
-                        this.executeCopperSmelt();
-                    } else if (featureName === 'charcoalFoundry') {
-                        this.executeCharcoalFoundry();
-                    } else if (featureName === 'oilManagement') {
-                        this.executeOilManagement();
-                    } else if (featureName === 'boatManagement') {
-                        this.executeBoatManagement();
-                    } else if (featureName === 'woodcutting') {
-                        this.executeWoodcutting();
-                    } else if (featureName === 'combat') {
-                        this.executeCombat();
-                    } else if (featureName === 'trapHarvesting') {
-                        this.executeTrapHarvesting();
-                    } else if (featureName === 'animalCollection') {
-                        this.executeAnimalCollection();
-                    }
+                    executor();
                 } catch (e) {
-                    logger.error(`${featurePrefix}定时执行出错:`, e);
+                    logger.error(`${meta.prefix}定时执行出错:`, e);
                 }
             }, validInterval);
 
-            logger.debug(`${featurePrefix}定时器已设置，间隔: ${validInterval}ms`);
+            logger.debug(`${meta.prefix}定时器已设置，间隔: ${validInterval}ms`);
         },
 
         // ============== 重启控制与URL检测 ==============
@@ -2778,17 +2742,8 @@ websocket.send("FOUNDRY=dense_logs~100")
             return this.jumpWithHealthCheck(url);
         },
 
-        // 停止功能（保留原逻辑，增强定时重启的停止）
         stopFeature: function(featureName) {
-            const featurePrefix = featureName === 'copperSmelt' ? '【矿石熔炼】' :
-                                 featureName === 'charcoalFoundry' ? '【煤炭熔炼】' :
-                                 featureName === 'oilManagement' ? '【石油管理】' :
-                                 featureName === 'boatManagement' ? '【渔船管理】' :
-                                 featureName === 'woodcutting' ? '【树木管理】' :
-                                 featureName === 'combat' ? '【自动战斗】' :
-                                 featureName === 'errorRestart' ? '【错误重启】' :
-                                 featureName === 'timedRestart' ? '【定时重启】' :
-                                 featureName === 'animalCollection' ? '【动物收集】' : '';
+            const meta = getFeatureMeta(featureName);
 
             if (featureName === 'timedRestart') {
                 this.toggleTimedRestart(false);
@@ -2796,7 +2751,7 @@ websocket.send("FOUNDRY=dense_logs~100")
             }
 
             if (timers[featureName]) {
-                logger.info(`${featurePrefix}功能停止，清除定时器ID: ${timers[featureName]}`);
+                logger.info(`${meta.prefix}功能停止，清除定时器ID: ${timers[featureName]}`);
                 clearInterval(timers[featureName]);
                 timers[featureName] = null;
             }
@@ -2804,7 +2759,7 @@ websocket.send("FOUNDRY=dense_logs~100")
             if (config.features[featureName]) {
                 config.features[featureName].enabled = false;
                 config.save();
-                logger.debug(`${featurePrefix}配置状态已更新为禁用`);
+                logger.debug(`${meta.prefix}配置状态已更新为禁用`);
             }
         }
     };
@@ -2871,24 +2826,15 @@ websocket.send("FOUNDRY=dense_logs~100")
         }
     }
 
-    // 切换功能状态
     function toggleFeature(featureKey, enabled, options = {}) {
-        const featurePrefix = featureKey === 'copperSmelt' ? '【矿石熔炼】' :
-                             featureKey === 'charcoalFoundry' ? '【煤炭熔炼】' :
-                             featureKey === 'oilManagement' ? '【石油管理】' :
-                             featureKey === 'boatManagement' ? '【渔船管理】' :
-                             featureKey === 'woodcutting' ? '【树木管理】' :
-                             featureKey === 'combat' ? '【自动战斗】' :
-                             featureKey === 'trapHarvesting' ? '【陷阱收获】' :
-                             featureKey === 'errorRestart' ? '【错误重启】' :
-                             featureKey === 'timedRestart' ? '【定时重启】' : '';
-        const featureName = config.features[featureKey]?.name || featureKey;
+        const meta = getFeatureMeta(featureKey);
+        const featureName = config.features[featureKey]?.name || meta.name;
         const feature = config.features[featureKey];
 
-        logger.info(`${featurePrefix}${featureName}: ${enabled ? '已启用' : '已禁用'}`);
+        logger.info(`${meta.prefix}${featureName}: ${enabled ? '已启用' : '已禁用'}`);
 
         if (!feature) {
-            logger.warn(`${featurePrefix}未找到功能配置，跳过处理`);
+            logger.warn(`${meta.prefix}未找到功能配置，跳过处理`);
             return;
         }
 
@@ -2900,40 +2846,32 @@ websocket.send("FOUNDRY=dense_logs~100")
 
         if (skipSave) {
             const context = sourceLabel ? `（来源: ${sourceLabel}）` : '';
-            logger.debug(`${featurePrefix}跳过保存配置${context}`);
+            logger.debug(`${meta.prefix}跳过保存配置${context}`);
         } else {
             config.save();
-            logger.debug(`${featurePrefix}配置已保存`);
+            logger.debug(`${meta.prefix}配置已保存`);
         }
 
         if (enabled) {
             if (featureKey === 'activateFurnace') {
-                // 对于激活熔炉功能，仍然直接执行，因为它不是定时任务
                 activateFurnaceAndStartSmelting();
             } else if (featureKey === 'errorRestart') {
-                // 错误重启功能特殊处理
-                logger.debug(`${featurePrefix}功能已启用，重置错误计数`);
+                logger.debug(`${meta.prefix}功能已启用，重置错误计数`);
                 featureManager.resetWebSocketErrorCount();
-                // 确保WebSocket错误监听器已设置
                 ensureWebSocketErrorListeners();
             } else if (featureKey === 'timedRestart') {
-                // 定时重启功能特殊处理
-                logger.debug(`${featurePrefix}功能已启用，设置定时重启`);
+                logger.debug(`${meta.prefix}功能已启用，设置定时重启`);
                 featureManager.toggleTimedRestart(true);
             } else {
                 if (skipIfRunning && timers[featureKey]) {
-                    logger.debug(`${featurePrefix}检测到定时器已运行，跳过重复启动`);
+                    logger.debug(`${meta.prefix}检测到定时器已运行，跳过重复启动`);
                     return;
                 }
-                // 常规定时功能
-                logger.debug(`${featurePrefix}功能已启用，设置定时器`);
-                // 直接启动功能，确保立即生效
+                logger.debug(`${meta.prefix}功能已启用，设置定时器`);
                 featureManager.startTimedFeature(featureKey, feature.interval);
             }
         } else {
-            // 禁用功能 - 立即调用stopFeature来停止功能，确保资源被释放
             if (featureKey === 'timedRestart') {
-                // 定时重启功能特殊处理
                 featureManager.toggleTimedRestart(false);
             }
             featureManager.stopFeature(featureKey);
