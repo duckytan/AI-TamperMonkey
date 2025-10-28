@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Idle Pixel Auto
 // @namespace    http://tampermonkey.net/
-// @version      2.5
+// @version      2.6
 // @description  自动进行Idle Pixel游戏中的各种操作
 // @author       Duckyの復活
 // @match        https://idle-pixel.com/login/play/
@@ -16,6 +16,12 @@
 
 /*
 更新日志：
+v2.6 (2025-10-24)
+1. 新增：独立 WebSocket 错误监控模块（WSMonitor），默认关闭且不干扰其他功能
+2. 新增：监控模块支持监听 window error/unhandledrejection 以及 console.error 中的 WebSocket CLOSING/CLOSED 异常
+3. 新增：异常记录包含每签名 10 秒节流与统计信息（累计次数、最后时间），设置面板提供清零按钮
+4. 完善：监控模块支持持久化配置与统计数据，禁用时自动恢复 console.error 并移除监听器
+
 v2.5 (2025-10-24)
 1. 新增：采矿精炼分区新增“煤炭熔炼”栏目，支持选择木材并定时送入煤窑
 2. 新增：煤炭熔炼支持随机木材模式，随机结果会实时同步到下拉列表
@@ -171,7 +177,7 @@ websocket.send("FOUNDRY=dense_logs~100")
     'use strict';
 
     // 统一版本号
-    const scriptVersion = '2.5';
+    const scriptVersion = '2.6';
     const featurePrefix = '【IdlePixelAuto】';
 
     // ================ 日志管理 ================
@@ -249,6 +255,15 @@ websocket.send("FOUNDRY=dense_logs~100")
     logger._exposeToGlobal();
 
     // ================ 配置与状态管理 ================
+    const createDefaultWsMonitorConfig = () => ({
+        enabled: false,
+        stats: {
+            total: 0,
+            lastSeen: 0,
+            signatures: {}
+        }
+    });
+
     // 配置对象，用于存储各个功能的设置
     const config = {
         // 全局设置
@@ -321,6 +336,7 @@ websocket.send("FOUNDRY=dense_logs~100")
                 name: '动物收集'
             }
         },
+        wsMonitor: createDefaultWsMonitorConfig(),
 
         // 验证配置值
         validate: function(key, value) {
@@ -408,6 +424,28 @@ websocket.send("FOUNDRY=dense_logs~100")
         // 保存配置到本地存储
         save: function() {
             try {
+                const wsMonitorConfig = this.wsMonitor || createDefaultWsMonitorConfig();
+                const sanitizedSignatures = {};
+                if (wsMonitorConfig && wsMonitorConfig.stats && typeof wsMonitorConfig.stats.signatures === 'object') {
+                    for (const key in wsMonitorConfig.stats.signatures) {
+                        if (!Object.prototype.hasOwnProperty.call(wsMonitorConfig.stats.signatures, key)) continue;
+                        const info = wsMonitorConfig.stats.signatures[key];
+                        if (!info || typeof info !== 'object') continue;
+                        sanitizedSignatures[key] = {
+                            count: typeof info.count === 'number' && info.count >= 0 ? info.count : 0,
+                            lastSeen: typeof info.lastSeen === 'number' ? info.lastSeen : 0
+                        };
+                    }
+                }
+                const sanitizedMonitor = {
+                    enabled: !!wsMonitorConfig.enabled,
+                    stats: {
+                        total: typeof wsMonitorConfig?.stats?.total === 'number' && wsMonitorConfig.stats.total >= 0 ? wsMonitorConfig.stats.total : 0,
+                        lastSeen: typeof wsMonitorConfig?.stats?.lastSeen === 'number' ? wsMonitorConfig.stats.lastSeen : 0,
+                        signatures: sanitizedSignatures
+                    }
+                };
+
                 // 保存全局设置、功能设置和调试设置
                 const completeConfig = {
                     globalSettings: this.globalSettings,
@@ -417,7 +455,8 @@ websocket.send("FOUNDRY=dense_logs~100")
                         showInfo: true,
                         showWarn: true,
                         showError: true
-                    }
+                    },
+                    wsMonitor: sanitizedMonitor
                 };
                 localStorage.setItem('idlePixelAutoConfig', JSON.stringify(completeConfig));
             } catch (e) {
@@ -444,6 +483,9 @@ websocket.send("FOUNDRY=dense_logs~100")
                         showError: true
                     };
                 }
+                if (!this.wsMonitor || typeof this.wsMonitor !== 'object') {
+                    this.wsMonitor = createDefaultWsMonitorConfig();
+                }
 
                 const saved = localStorage.getItem('idlePixelAutoConfig');
                 if (saved) {
@@ -462,6 +504,31 @@ websocket.send("FOUNDRY=dense_logs~100")
                             ...this.debugSettings,
                             ...parsed.debugSettings
                         };
+                    }
+                    // 加载 wsMonitor 配置
+                    if (parsed && typeof parsed.wsMonitor === 'object') {
+                        const loaded = parsed.wsMonitor;
+                        const defaultMonitor = createDefaultWsMonitorConfig();
+                        defaultMonitor.enabled = !!loaded.enabled;
+                        const loadedStats = loaded && typeof loaded.stats === 'object' ? loaded.stats : {};
+                        defaultMonitor.stats.total = typeof loadedStats.total === 'number' && loadedStats.total >= 0 ? loadedStats.total : 0;
+                        defaultMonitor.stats.lastSeen = typeof loadedStats.lastSeen === 'number' ? loadedStats.lastSeen : 0;
+                        if (loadedStats.signatures && typeof loadedStats.signatures === 'object') {
+                            const sanitizedSignatures = {};
+                            for (const key in loadedStats.signatures) {
+                                if (!Object.prototype.hasOwnProperty.call(loadedStats.signatures, key)) continue;
+                                const rec = loadedStats.signatures[key];
+                                if (!rec || typeof rec !== 'object') continue;
+                                sanitizedSignatures[key] = {
+                                    count: typeof rec.count === 'number' && rec.count >= 0 ? rec.count : 0,
+                                    lastSeen: typeof rec.lastSeen === 'number' ? rec.lastSeen : 0
+                                };
+                            }
+                            defaultMonitor.stats.signatures = sanitizedSignatures;
+                        }
+                        this.wsMonitor = defaultMonitor;
+                    } else {
+                        this.wsMonitor = createDefaultWsMonitorConfig();
                     }
 
                     // 验证并应用功能配置
@@ -1433,6 +1500,192 @@ websocket.send("FOUNDRY=dense_logs~100")
     };
 
     try { (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window).IPXFurnace = IPXFurnace; logger.debug('【熔炉兼容】IPXFurnace 已挂载到全局'); } catch(e) {}
+
+    // ================ WebSocket 错误监控模块（独立、默认关闭） ================
+    const WSMonitor = {
+        _errorHandler: null,
+        _rejectionHandler: null,
+        _originalConsoleError: null,
+        _throttleDelay: 10000,
+        _targetSignature: 'WebSocket is already in CLOSING or CLOSED state',
+
+        enable: function() {
+            if (!config || !config.wsMonitor) return;
+            const cfg = config.wsMonitor;
+            if (cfg.enabled) {
+                logger.debug('【WSMonitor】已启用，跳过重复启用');
+                return;
+            }
+            cfg.enabled = true;
+            config.save();
+            this._attachListeners();
+            this._wrapConsoleError();
+            logger.info('【WSMonitor】已启用 WebSocket 错误监控');
+        },
+
+        disable: function() {
+            if (!config || !config.wsMonitor) return;
+            const cfg = config.wsMonitor;
+            if (!cfg.enabled) {
+                logger.debug('【WSMonitor】已禁用，跳过重复禁用');
+                return;
+            }
+            cfg.enabled = false;
+            config.save();
+            this._detachListeners();
+            this._restoreConsoleError();
+            logger.info('【WSMonitor】已禁用 WebSocket 错误监控');
+        },
+
+        reset: function() {
+            if (!config || !config.wsMonitor) return;
+            const cfg = config.wsMonitor;
+            cfg.stats.total = 0;
+            cfg.stats.lastSeen = 0;
+            cfg.stats.signatures = {};
+            config.save();
+            this._updateUI();
+            logger.info('【WSMonitor】统计已重置');
+        },
+
+        getStats: function() {
+            if (!config || !config.wsMonitor) return createDefaultWsMonitorConfig().stats;
+            return config.wsMonitor.stats;
+        },
+
+        _attachListeners: function() {
+            try {
+                this._detachListeners();
+                this._errorHandler = (event) => {
+                    try {
+                        if (!event || !event.error) return;
+                        const err = event.error;
+                        if (err instanceof DOMException && err.message && err.message.includes(this._targetSignature)) {
+                            this._recordError(this._targetSignature);
+                        }
+                    } catch (e) {
+                        logger.debug('【WSMonitor】error监听器异常:', e);
+                    }
+                };
+                this._rejectionHandler = (event) => {
+                    try {
+                        if (!event || !event.reason) return;
+                        const r = event.reason;
+                        const msg = (r instanceof Error || r instanceof DOMException) ? r.message : String(r);
+                        if (msg && msg.includes(this._targetSignature)) {
+                            this._recordError(this._targetSignature);
+                        }
+                    } catch (e) {
+                        logger.debug('【WSMonitor】rejection监听器异常:', e);
+                    }
+                };
+                window.addEventListener('error', this._errorHandler, true);
+                window.addEventListener('unhandledrejection', this._rejectionHandler);
+                logger.debug('【WSMonitor】已附加 error/unhandledrejection 监听器');
+            } catch (e) {
+                logger.error('【WSMonitor】附加监听器失败:', e);
+            }
+        },
+
+        _detachListeners: function() {
+            try {
+                if (this._errorHandler) {
+                    window.removeEventListener('error', this._errorHandler, true);
+                    this._errorHandler = null;
+                }
+                if (this._rejectionHandler) {
+                    window.removeEventListener('unhandledrejection', this._rejectionHandler);
+                    this._rejectionHandler = null;
+                }
+                logger.debug('【WSMonitor】已移除 error/unhandledrejection 监听器');
+            } catch (e) {
+                logger.debug('【WSMonitor】移除监听器异常:', e);
+            }
+        },
+
+        _wrapConsoleError: function() {
+            try {
+                if (this._originalConsoleError) return;
+                this._originalConsoleError = console.error;
+                const self = this;
+                console.error = function(...args) {
+                    try {
+                        const combined = args.map(a => String(a)).join(' ');
+                        if (combined.includes(self._targetSignature)) {
+                            self._recordError(self._targetSignature);
+                        }
+                    } catch (e) {}
+                    return self._originalConsoleError.apply(console, args);
+                };
+                logger.debug('【WSMonitor】已包装 console.error');
+            } catch (e) {
+                logger.error('【WSMonitor】包装 console.error 失败:', e);
+            }
+        },
+
+        _restoreConsoleError: function() {
+            try {
+                if (this._originalConsoleError) {
+                    console.error = this._originalConsoleError;
+                    this._originalConsoleError = null;
+                    logger.debug('【WSMonitor】已恢复 console.error');
+                }
+            } catch (e) {
+                logger.debug('【WSMonitor】恢复 console.error 异常:', e);
+            }
+        },
+
+        _recordError: function(signature) {
+            try {
+                if (!config || !config.wsMonitor || !config.wsMonitor.enabled) return;
+                const cfg = config.wsMonitor;
+                const now = Date.now();
+                const signatureInfo = cfg.stats.signatures[signature] || { count: 0, lastSeen: 0 };
+                const elapsed = now - signatureInfo.lastSeen;
+                if (elapsed < this._throttleDelay) {
+                    logger.debug(`【WSMonitor】节流：距上次记录仅${elapsed}ms，忽略`);
+                    return;
+                }
+                signatureInfo.count++;
+                signatureInfo.lastSeen = now;
+                cfg.stats.signatures[signature] = signatureInfo;
+                cfg.stats.total++;
+                cfg.stats.lastSeen = now;
+                config.save();
+                this._updateUI();
+                logger.warn(`【WSMonitor】检测到 WebSocket 错误 [${signature}]，累计：${cfg.stats.total} 次`);
+            } catch (e) {
+                logger.error('【WSMonitor】记录错误失败:', e);
+            }
+        },
+
+        _updateUI: function() {
+            try {
+                const cfg = config && config.wsMonitor ? config.wsMonitor : createDefaultWsMonitorConfig();
+                const totalSpan = document.querySelector('#ws-monitor-total');
+                if (totalSpan) totalSpan.textContent = cfg.stats.total || 0;
+                const lastSeenSpan = document.querySelector('#ws-monitor-last');
+                if (lastSeenSpan) {
+                    if (cfg.stats.lastSeen > 0) {
+                        const date = new Date(cfg.stats.lastSeen);
+                        const y = date.getFullYear();
+                        const mo = String(date.getMonth() + 1).padStart(2, '0');
+                        const d = String(date.getDate()).padStart(2, '0');
+                        const h = String(date.getHours()).padStart(2, '0');
+                        const m = String(date.getMinutes()).padStart(2, '0');
+                        const s = String(date.getSeconds()).padStart(2, '0');
+                        lastSeenSpan.textContent = `${y}-${mo}-${d} ${h}:${m}:${s}`;
+                    } else {
+                        lastSeenSpan.textContent = '--';
+                    }
+                }
+                const evt = new Event('ipa:ws-monitor-update');
+                window.dispatchEvent(evt);
+            } catch (e) {
+                logger.debug('【WSMonitor】更新UI失败:', e);
+            }
+        }
+    };
 
     // ================ 功能管理器 ================
     const featureManager = {
@@ -4441,6 +4694,93 @@ websocket.send("FOUNDRY=dense_logs~100")
         updateErrorCountDisplay();
 
         // 旧版重启控制逻辑已移除，统一由重启控制小节管理
+
+        // 5. 诊断分区
+        const diagnosticSection = createSectionTitle('诊断实验');
+        panel.appendChild(diagnosticSection);
+        const diagnosticContent = diagnosticSection.contentContainer;
+
+        // WS 错误监控（独立/试验）
+        const wsMonitorRow = document.createElement('div');
+        wsMonitorRow.className = 'feature-row';
+        wsMonitorRow.innerHTML = `
+            <input id="ws-monitor-toggle" type="checkbox" class="feature-checkbox">
+            <span class="feature-name" title="被动监控“WebSocket is already in CLOSING or CLOSED state.”错误，不修改任何 WebSocket 行为">WS 错误监控（独立/试验）</span>
+            <div class="feature-settings" style="gap:12px; flex-wrap:wrap; align-items:center;">
+                <span class="interval-label" style="margin-left:auto;">累计：<strong id="ws-monitor-total" style="color:#ef4444;">0</strong></span>
+                <span class="interval-label">最后：<strong id="ws-monitor-last" style="color:#666;">--</strong></span>
+                <button id="ws-monitor-reset" class="check-url-button" style="background:#6b7280;">清零</button>
+            </div>
+        `;
+        diagnosticContent.appendChild(wsMonitorRow);
+
+        const wsMonitorToggle = wsMonitorRow.querySelector('#ws-monitor-toggle');
+        const wsMonitorResetButton = wsMonitorRow.querySelector('#ws-monitor-reset');
+        const wsMonitorTotalSpan = wsMonitorRow.querySelector('#ws-monitor-total');
+        const wsMonitorLastSpan = wsMonitorRow.querySelector('#ws-monitor-last');
+
+        const formatWsMonitorTime = (timestamp) => {
+            if (!timestamp) return '--';
+            try {
+                const date = new Date(timestamp);
+                if (Number.isNaN(date.getTime())) return '--';
+                const y = date.getFullYear();
+                const m = String(date.getMonth() + 1).padStart(2, '0');
+                const d = String(date.getDate()).padStart(2, '0');
+                const hh = String(date.getHours()).padStart(2, '0');
+                const mm = String(date.getMinutes()).padStart(2, '0');
+                const ss = String(date.getSeconds()).padStart(2, '0');
+                return y + '-' + m + '-' + d + ' ' + hh + ':' + mm + ':' + ss;
+            } catch (err) {
+                logger.debug('【WSMonitor】格式化时间异常:', err);
+                return '--';
+            }
+        };
+
+        const refreshWsMonitorUI = () => {
+            try {
+                const stats = WSMonitor.getStats();
+                wsMonitorTotalSpan.textContent = stats.total || 0;
+                wsMonitorLastSpan.textContent = formatWsMonitorTime(stats.lastSeen);
+                const cfg = config.wsMonitor || createDefaultWsMonitorConfig();
+                wsMonitorToggle.checked = !!cfg.enabled;
+            } catch (err) {
+                logger.debug('【WSMonitor】刷新UI异常:', err);
+            }
+        };
+
+        wsMonitorToggle.addEventListener('change', (e) => {
+            try {
+                if (e.target.checked) {
+                    WSMonitor.enable();
+                } else {
+                    WSMonitor.disable();
+                }
+            } catch (err) {
+                logger.error('【WSMonitor】切换失败:', err);
+            } finally {
+                refreshWsMonitorUI();
+            }
+        });
+
+        wsMonitorResetButton.addEventListener('click', () => {
+            try {
+                WSMonitor.reset();
+            } catch (err) {
+                logger.error('【WSMonitor】清零失败:', err);
+            } finally {
+                refreshWsMonitorUI();
+            }
+        });
+
+        window.addEventListener('ipa:ws-monitor-update', refreshWsMonitorUI);
+
+        const wsMonitorDesc = document.createElement('div');
+        wsMonitorDesc.className = 'feature-description';
+        wsMonitorDesc.textContent = '仅记录 WebSocket CLOSING/CLOSED 异常次数与时间，不拦截或修改消息。';
+        diagnosticContent.appendChild(wsMonitorDesc);
+
+        refreshWsMonitorUI();
 
 
         // Mod按钮点击事件 - 简化为简单的显示/隐藏
