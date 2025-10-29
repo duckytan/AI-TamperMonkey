@@ -1974,8 +1974,12 @@ websocket.send("FOUNDRY=dense_logs~100")
                         writable: descriptor.writable === undefined ? true : descriptor.writable,
                         value: wrapped
                     };
-                    Object.defineProperty(owner, 'error', newDescriptor);
-                    applied = true;
+                    try {
+                        Object.defineProperty(owner, 'error', newDescriptor);
+                        applied = true;
+                    } catch (defineErr) {
+                        logger.debug('【WSMonitor】重写 console.error 失败（数据属性）:', defineErr);
+                    }
                 } else if (descriptor.get || descriptor.set) {
                     const newDescriptor = {
                         configurable: descriptor.configurable === undefined ? true : descriptor.configurable,
@@ -2002,8 +2006,12 @@ websocket.send("FOUNDRY=dense_logs~100")
                         };
                     }
 
-                    Object.defineProperty(owner, 'error', newDescriptor);
-                    applied = true;
+                    try {
+                        Object.defineProperty(owner, 'error', newDescriptor);
+                        applied = true;
+                    } catch (defineErr) {
+                        logger.debug('【WSMonitor】重写 console.error 失败（访问器属性）:', defineErr);
+                    }
                 }
 
                 if (applied) {
@@ -2013,12 +2021,11 @@ websocket.send("FOUNDRY=dense_logs~100")
                     logger.debug('【WSMonitor】已包装 console.error');
                 } else {
                     this._originalConsoleError = null;
+                    this._consoleErrorOwner = null;
+                    this._consoleErrorDescriptor = null;
                     logger.debug('【WSMonitor】console.error 包装失败，条件不满足');
                 }
             } catch (e) {
-                this._originalConsoleError = null;
-                this._consoleErrorOwner = null;
-                this._consoleErrorDescriptor = null;
                 logger.error('【WSMonitor】包装 console.error 失败:', e);
             }
         },
@@ -2076,10 +2083,16 @@ websocket.send("FOUNDRY=dense_logs~100")
                     return original.apply(console, args);
                 };
 
-                console.warn = wrapped;
-                this._originalConsoleWarn = original;
-                this._consoleWarnDescriptor = descriptor;
-                logger.debug('【WSMonitor】已包装 console.warn');
+                try {
+                    console.warn = wrapped;
+                    this._originalConsoleWarn = original;
+                    this._consoleWarnDescriptor = descriptor;
+                    logger.debug('【WSMonitor】已包装 console.warn');
+                } catch (assignErr) {
+                    this._originalConsoleWarn = null;
+                    this._consoleWarnDescriptor = null;
+                    logger.debug('【WSMonitor】重写 console.warn 失败:', assignErr);
+                }
             } catch (e) {
                 this._originalConsoleWarn = null;
                 this._consoleWarnDescriptor = null;
