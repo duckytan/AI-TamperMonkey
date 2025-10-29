@@ -1751,10 +1751,21 @@ websocket.send("FOUNDRY=dense_logs~100")
         _errorHandler: null,
         _rejectionHandler: null,
         _originalConsoleError: null,
+        _originalConsoleWarn: null,
         _consoleErrorOwner: null,
         _consoleErrorDescriptor: null,
+        _consoleWarnDescriptor: null,
         _throttleDelay: 10000,
-        _targetSignature: 'WebSocket is already in CLOSING or CLOSED state',
+        _lastRecordTime: {},
+        _targetPatterns: [
+            'WebSocket is already in CLOSING or CLOSED state',
+            'WebSocket is not open',
+            'WebSocket connection',
+            'WebSocket',
+            'websocket',
+            'CLOSING',
+            'CLOSED'
+        ],
 
         enable: function() {
             if (!config || !config.wsMonitor) return;
@@ -1767,7 +1778,8 @@ websocket.send("FOUNDRY=dense_logs~100")
             config.save();
             this._attachListeners();
             this._wrapConsoleError();
-            logger.info('【WSMonitor】已启用 WebSocket 错误监控');
+            this._wrapConsoleWarn();
+            logger.info('【WSMonitor】已启用 WebSocket 错误监控（扩展模式）');
         },
 
         disable: function() {
@@ -1781,6 +1793,7 @@ websocket.send("FOUNDRY=dense_logs~100")
             config.save();
             this._detachListeners();
             this._restoreConsoleError();
+            this._restoreConsoleWarn();
             logger.info('【WSMonitor】已禁用 WebSocket 错误监控');
         },
 
@@ -1800,15 +1813,41 @@ websocket.send("FOUNDRY=dense_logs~100")
             return config.wsMonitor.stats;
         },
 
+        _matchesPattern: function(text) {
+            if (!text) return null;
+            const str = String(text).toLowerCase();
+            for (const pattern of this._targetPatterns) {
+                if (str.includes(pattern.toLowerCase())) {
+                    return pattern;
+                }
+            }
+            return null;
+        },
+
         _attachListeners: function() {
             try {
                 this._detachListeners();
                 this._errorHandler = (event) => {
                     try {
-                        if (!event || !event.error) return;
-                        const err = event.error;
-                        if (err instanceof DOMException && err.message && err.message.includes(this._targetSignature)) {
-                            this._recordError(this._targetSignature);
+                        // 检查event.message（字符串错误）
+                        if (event && event.message) {
+                            const matched = this._matchesPattern(event.message);
+                            if (matched) {
+                                logger.warn('【WSMonitor】捕获错误（event.message）:', event.message.substring(0, 100));
+                                this._recordError(matched, event.message.substring(0, 200));
+                                return;
+                            }
+                        }
+                        
+                        // 检查event.error对象
+                        if (event && event.error) {
+                            const err = event.error;
+                            const errMsg = err.message || err.toString();
+                            const matched = this._matchesPattern(errMsg);
+                            if (matched) {
+                                logger.warn('【WSMonitor】捕获错误（event.error）:', errMsg.substring(0, 100));
+                                this._recordError(matched, errMsg.substring(0, 200));
+                            }
                         }
                     } catch (e) {
                         logger.debug('【WSMonitor】error监听器异常:', e);
@@ -1819,8 +1858,10 @@ websocket.send("FOUNDRY=dense_logs~100")
                         if (!event || !event.reason) return;
                         const r = event.reason;
                         const msg = (r instanceof Error || r instanceof DOMException) ? r.message : String(r);
-                        if (msg && msg.includes(this._targetSignature)) {
-                            this._recordError(this._targetSignature);
+                        const matched = this._matchesPattern(msg);
+                        if (matched) {
+                            logger.warn('【WSMonitor】捕获Promise拒绝:', msg.substring(0, 100));
+                            this._recordError(matched, msg.substring(0, 200));
                         }
                     } catch (e) {
                         logger.debug('【WSMonitor】rejection监听器异常:', e);
@@ -1828,7 +1869,7 @@ websocket.send("FOUNDRY=dense_logs~100")
                 };
                 window.addEventListener('error', this._errorHandler, true);
                 window.addEventListener('unhandledrejection', this._rejectionHandler);
-                logger.debug('【WSMonitor】已附加 error/unhandledrejection 监听器');
+                logger.info('【WSMonitor】已附加 error/unhandledrejection 监听器（扩展模式）');
             } catch (e) {
                 logger.error('【WSMonitor】附加监听器失败:', e);
             }
@@ -1915,8 +1956,10 @@ websocket.send("FOUNDRY=dense_logs~100")
                                 return '[object]';
                             }
                         }).join(' ');
-                        if (combined.includes(self._targetSignature)) {
-                            self._recordError(self._targetSignature);
+                        const matched = self._matchesPattern(combined);
+                        if (matched) {
+                            logger.warn('【WSMonitor】捕获错误（console.error）:', combined.substring(0, 100));
+                            self._recordError(matched, combined.substring(0, 200));
                         }
                     } catch (_) {}
                     return currentOriginal.apply(console, args);
@@ -2003,7 +2046,62 @@ websocket.send("FOUNDRY=dense_logs~100")
             }
         },
 
-        _recordError: function(signature) {
+        _wrapConsoleWarn: function() {
+            try {
+                if (this._originalConsoleWarn) return;
+                
+                let descriptor = Object.getOwnPropertyDescriptor(console, 'warn');
+                if (!descriptor || typeof console.warn !== 'function') {
+                    logger.debug('【WSMonitor】console.warn 不可用，跳过包装');
+                    return;
+                }
+
+                const original = console.warn;
+                const self = this;
+                const wrapped = function(...args) {
+                    try {
+                        const combined = args.map(arg => {
+                            try {
+                                return String(arg);
+                            } catch (_) {
+                                return '[object]';
+                            }
+                        }).join(' ');
+                        const matched = self._matchesPattern(combined);
+                        if (matched) {
+                            logger.warn('【WSMonitor】捕获警告（console.warn）:', combined.substring(0, 100));
+                            self._recordError(matched, combined.substring(0, 200));
+                        }
+                    } catch (_) {}
+                    return original.apply(console, args);
+                };
+
+                console.warn = wrapped;
+                this._originalConsoleWarn = original;
+                this._consoleWarnDescriptor = descriptor;
+                logger.debug('【WSMonitor】已包装 console.warn');
+            } catch (e) {
+                this._originalConsoleWarn = null;
+                this._consoleWarnDescriptor = null;
+                logger.error('【WSMonitor】包装 console.warn 失败:', e);
+            }
+        },
+
+        _restoreConsoleWarn: function() {
+            try {
+                if (this._originalConsoleWarn) {
+                    console.warn = this._originalConsoleWarn;
+                    logger.debug('【WSMonitor】已恢复 console.warn');
+                }
+            } catch (e) {
+                logger.debug('【WSMonitor】恢复 console.warn 异常:', e);
+            } finally {
+                this._originalConsoleWarn = null;
+                this._consoleWarnDescriptor = null;
+            }
+        },
+
+        _recordError: function(signature, fullMessage) {
             try {
                 if (!config || !config.wsMonitor || !config.wsMonitor.enabled) return;
                 const cfg = config.wsMonitor;
