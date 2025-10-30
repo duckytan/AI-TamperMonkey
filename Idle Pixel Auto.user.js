@@ -1766,6 +1766,9 @@ websocket.send("FOUNDRY=dense_logs~100")
             'CLOSING',
             'CLOSED'
         ],
+        _fallbackMonitoringSetup: false,
+        _fallbackMonitoringInterval: null,
+        _lastKnownConsoleError: null,
 
         enable: function() {
             if (!config || !config.wsMonitor) return;
@@ -1794,6 +1797,12 @@ websocket.send("FOUNDRY=dense_logs~100")
             this._detachListeners();
             this._restoreConsoleError();
             this._restoreConsoleWarn();
+            if (this._fallbackMonitoringInterval) {
+                clearInterval(this._fallbackMonitoringInterval);
+                this._fallbackMonitoringInterval = null;
+                this._fallbackMonitoringSetup = false;
+                logger.debug('【WSMonitor】已停止备用监控');
+            }
             logger.info('【WSMonitor】已禁用 WebSocket 错误监控');
         },
 
@@ -1811,6 +1820,24 @@ websocket.send("FOUNDRY=dense_logs~100")
         getStats: function() {
             if (!config || !config.wsMonitor) return createDefaultWsMonitorConfig().stats;
             return config.wsMonitor.stats;
+        },
+
+        capture: function(rawText, source = 'external') {
+            return this._processMessage(rawText, source);
+        },
+
+        _processMessage: function(rawText, source) {
+            try {
+                if (rawText === undefined || rawText === null) return false;
+                const text = String(rawText);
+                const matched = this._matchesPattern(text);
+                if (!matched) return false;
+                this._recordError(matched, text.substring(0, 200), source);
+                return true;
+            } catch (e) {
+                logger.debug('【WSMonitor】处理消息异常:', e);
+                return false;
+            }
         },
 
         _matchesPattern: function(text) {
@@ -1831,23 +1858,14 @@ websocket.send("FOUNDRY=dense_logs~100")
                     try {
                         // 检查event.message（字符串错误）
                         if (event && event.message) {
-                            const matched = this._matchesPattern(event.message);
-                            if (matched) {
-                                logger.warn('【WSMonitor】捕获错误（event.message）:', event.message.substring(0, 100));
-                                this._recordError(matched, event.message.substring(0, 200));
-                                return;
-                            }
+                            this._processMessage(event.message, 'window.error(message)');
                         }
                         
                         // 检查event.error对象
                         if (event && event.error) {
                             const err = event.error;
                             const errMsg = err.message || err.toString();
-                            const matched = this._matchesPattern(errMsg);
-                            if (matched) {
-                                logger.warn('【WSMonitor】捕获错误（event.error）:', errMsg.substring(0, 100));
-                                this._recordError(matched, errMsg.substring(0, 200));
-                            }
+                            this._processMessage(errMsg, 'window.error(error)');
                         }
                     } catch (e) {
                         logger.debug('【WSMonitor】error监听器异常:', e);
@@ -1858,11 +1876,7 @@ websocket.send("FOUNDRY=dense_logs~100")
                         if (!event || !event.reason) return;
                         const r = event.reason;
                         const msg = (r instanceof Error || r instanceof DOMException) ? r.message : String(r);
-                        const matched = this._matchesPattern(msg);
-                        if (matched) {
-                            logger.warn('【WSMonitor】捕获Promise拒绝:', msg.substring(0, 100));
-                            this._recordError(matched, msg.substring(0, 200));
-                        }
+                        this._processMessage(msg, 'unhandledrejection');
                     } catch (e) {
                         logger.debug('【WSMonitor】rejection监听器异常:', e);
                     }
@@ -1893,7 +1907,10 @@ websocket.send("FOUNDRY=dense_logs~100")
 
         _wrapConsoleError: function() {
             try {
-                if (this._originalConsoleError) return;
+                if (this._originalConsoleError) {
+                    this._setupFallbackMonitoring();
+                    return;
+                }
 
                 let owner = console;
                 let descriptor = Object.getOwnPropertyDescriptor(owner, 'error');
@@ -1910,19 +1927,16 @@ websocket.send("FOUNDRY=dense_logs~100")
                     }
                 }
 
-                if (!descriptor) {
-                    logger.debug('【WSMonitor】未找到 console.error 描述符，跳过包装');
-                    return;
-                }
-
                 let original = null;
-                if (typeof descriptor.value === 'function') {
-                    original = descriptor.value;
-                } else if (typeof descriptor.get === 'function') {
-                    try {
-                        original = descriptor.get.call(console);
-                    } catch (getErr) {
-                        logger.debug('【WSMonitor】获取 console.error 原函数失败:', getErr);
+                if (descriptor) {
+                    if (typeof descriptor.value === 'function') {
+                        original = descriptor.value;
+                    } else if (typeof descriptor.get === 'function') {
+                        try {
+                            original = descriptor.get.call(console);
+                        } catch (getErr) {
+                            logger.debug('【WSMonitor】获取 console.error 原函数失败:', getErr);
+                        }
                     }
                 }
 
@@ -1931,17 +1945,8 @@ websocket.send("FOUNDRY=dense_logs~100")
                 }
 
                 if (typeof original !== 'function') {
-                    logger.debug('【WSMonitor】console.error 非函数，跳过包装');
-                    return;
-                }
-
-                if ('value' in descriptor && descriptor.writable === false && descriptor.configurable === false) {
-                    logger.debug('【WSMonitor】console.error 属性不可写且不可配置，跳过包装');
-                    return;
-                }
-
-                if (!('value' in descriptor) && descriptor.configurable === false) {
-                    logger.debug('【WSMonitor】console.error 描述符不可配置，跳过包装');
+                    logger.debug('【WSMonitor】console.error 非函数，启用备用监控');
+                    this._setupFallbackMonitoring();
                     return;
                 }
 
@@ -1956,77 +1961,160 @@ websocket.send("FOUNDRY=dense_logs~100")
                                 return '[object]';
                             }
                         }).join(' ');
-                        const matched = self._matchesPattern(combined);
-                        if (matched) {
-                            logger.warn('【WSMonitor】捕获错误（console.error）:', combined.substring(0, 100));
-                            self._recordError(matched, combined.substring(0, 200));
-                        }
+                        self._processMessage(combined, 'console.error');
                     } catch (_) {}
                     return currentOriginal.apply(console, args);
                 };
+                wrapped._wsMonitorWrapped = true;
+                wrapped._wsMonitorOriginal = original;
+                wrapped._wsMonitorSource = 'primary';
 
                 let applied = false;
+                let appliedViaDescriptor = false;
 
-                if ('value' in descriptor) {
-                    const newDescriptor = {
-                        configurable: descriptor.configurable === undefined ? true : descriptor.configurable,
-                        enumerable: descriptor.enumerable === undefined ? false : descriptor.enumerable,
-                        writable: descriptor.writable === undefined ? true : descriptor.writable,
-                        value: wrapped
-                    };
-                    try {
-                        Object.defineProperty(owner, 'error', newDescriptor);
-                        applied = true;
-                    } catch (defineErr) {
-                        logger.debug('【WSMonitor】重写 console.error 失败（数据属性）:', defineErr);
-                    }
-                } else if (descriptor.get || descriptor.set) {
-                    const newDescriptor = {
-                        configurable: descriptor.configurable === undefined ? true : descriptor.configurable,
-                        enumerable: descriptor.enumerable === undefined ? false : descriptor.enumerable,
-                        get: () => wrapped
-                    };
+                if (descriptor) {
+                    const canUseValueDescriptor =
+                        ('value' in descriptor) &&
+                        !(descriptor.writable === false && descriptor.configurable === false);
+                    const canUseAccessorDescriptor =
+                        !('value' in descriptor) && descriptor.configurable !== false;
 
-                    if (descriptor.set) {
-                        const originalSetter = descriptor.set;
-                        newDescriptor.set = function(value) {
-                            originalSetter.call(this, value);
-                            if (typeof value === 'function') {
-                                currentOriginal = value;
-                                self._originalConsoleError = value;
-                            } else if (typeof descriptor.get === 'function') {
-                                try {
-                                    const latest = descriptor.get.call(console);
-                                    if (typeof latest === 'function') {
-                                        currentOriginal = latest;
-                                        self._originalConsoleError = latest;
-                                    }
-                                } catch (_) {}
-                            }
+                    if (canUseValueDescriptor) {
+                        const newDescriptor = {
+                            configurable: descriptor.configurable === undefined ? true : descriptor.configurable,
+                            enumerable: descriptor.enumerable === undefined ? false : descriptor.enumerable,
+                            writable: descriptor.writable === undefined ? true : descriptor.writable,
+                            value: wrapped
                         };
-                    }
+                        try {
+                            Object.defineProperty(owner, 'error', newDescriptor);
+                            applied = true;
+                            appliedViaDescriptor = true;
+                        } catch (defineErr) {
+                            logger.debug('【WSMonitor】重写 console.error 失败（数据属性）:', defineErr);
+                        }
+                    } else if (canUseAccessorDescriptor) {
+                        const newDescriptor = {
+                            configurable: descriptor.configurable === undefined ? true : descriptor.configurable,
+                            enumerable: descriptor.enumerable === undefined ? false : descriptor.enumerable,
+                            get: () => wrapped
+                        };
 
+                        if (descriptor.set) {
+                            const originalSetter = descriptor.set;
+                            newDescriptor.set = function(value) {
+                                originalSetter.call(this, value);
+                                if (typeof value === 'function') {
+                                    currentOriginal = value;
+                                    self._originalConsoleError = value;
+                                } else if (typeof descriptor.get === 'function') {
+                                    try {
+                                        const latest = descriptor.get.call(console);
+                                        if (typeof latest === 'function') {
+                                            currentOriginal = latest;
+                                            self._originalConsoleError = latest;
+                                        }
+                                    } catch (_) {}
+                                }
+                            };
+                        }
+
+                        try {
+                            Object.defineProperty(owner, 'error', newDescriptor);
+                            applied = true;
+                            appliedViaDescriptor = true;
+                        } catch (defineErr) {
+                            logger.debug('【WSMonitor】重写 console.error 失败（访问器属性）:', defineErr);
+                        }
+                    }
+                }
+
+                if (!applied) {
                     try {
-                        Object.defineProperty(owner, 'error', newDescriptor);
+                        console.error = wrapped;
                         applied = true;
-                    } catch (defineErr) {
-                        logger.debug('【WSMonitor】重写 console.error 失败（访问器属性）:', defineErr);
+                    } catch (assignErr) {
+                        logger.debug('【WSMonitor】重写 console.error 失败（直接赋值）:', assignErr);
                     }
                 }
 
                 if (applied) {
                     this._originalConsoleError = currentOriginal;
-                    this._consoleErrorOwner = owner;
-                    this._consoleErrorDescriptor = descriptor;
-                    logger.debug('【WSMonitor】已包装 console.error');
+                    if (appliedViaDescriptor) {
+                        this._consoleErrorOwner = owner;
+                        this._consoleErrorDescriptor = descriptor;
+                    } else {
+                        this._consoleErrorOwner = null;
+                        this._consoleErrorDescriptor = null;
+                    }
+                    logger.debug('【WSMonitor】已包装 console.error（主监控激活）');
                 } else {
                     this._originalConsoleError = null;
                     this._consoleErrorOwner = null;
                     this._consoleErrorDescriptor = null;
-                    logger.debug('【WSMonitor】console.error 包装失败，条件不满足');
+                    logger.warn('【WSMonitor】console.error 主包装失败，启用备用监控');
+                    this._setupFallbackMonitoring();
+                    return;
                 }
+
+                this._setupFallbackMonitoring();
             } catch (e) {
                 logger.error('【WSMonitor】包装 console.error 失败:', e);
+                this._setupFallbackMonitoring();
+            }
+        },
+
+
+        _setupFallbackMonitoring: function() {
+            try {
+                if (this._fallbackMonitoringSetup) return;
+                this._fallbackMonitoringSetup = true;
+                
+                const self = this;
+                const checkInterval = setInterval(() => {
+                    if (!config || !config.wsMonitor || !config.wsMonitor.enabled) {
+                        clearInterval(checkInterval);
+                        self._fallbackMonitoringSetup = false;
+                        return;
+                    }
+                    
+                    try {
+                        const currentConsoleError = console.error;
+                        if (typeof currentConsoleError === 'function' && 
+                            currentConsoleError !== self._lastKnownConsoleError) {
+                            
+                            self._lastKnownConsoleError = currentConsoleError;
+                            
+                            const wrappedCheck = function(...args) {
+                                try {
+                                    const combined = args.map(arg => {
+                                        try {
+                                            return String(arg);
+                                        } catch (_) {
+                                            return '[object]';
+                                        }
+                                    }).join(' ');
+                                    self._processMessage(combined, 'console.error(fallback)');
+                                } catch (_) {}
+                                return currentConsoleError.apply(console, args);
+                            };
+                            
+                            try {
+                                console.error = wrappedCheck;
+                                logger.debug('【WSMonitor】备用监控已更新 console.error 包装');
+                            } catch (_) {
+                                // 如果无法重新包装，继续使用旧的
+                            }
+                        }
+                    } catch (e) {
+                        logger.debug('【WSMonitor】备用监控检查异常:', e);
+                    }
+                }, 5000);
+                
+                this._fallbackMonitoringInterval = checkInterval;
+                logger.info('【WSMonitor】备用监控已启动，每5秒检查一次 console.error');
+            } catch (e) {
+                logger.error('【WSMonitor】设置备用监控失败:', e);
             }
         },
 
@@ -2074,11 +2162,7 @@ websocket.send("FOUNDRY=dense_logs~100")
                                 return '[object]';
                             }
                         }).join(' ');
-                        const matched = self._matchesPattern(combined);
-                        if (matched) {
-                            logger.warn('【WSMonitor】捕获警告（console.warn）:', combined.substring(0, 100));
-                            self._recordError(matched, combined.substring(0, 200));
-                        }
+                        self._processMessage(combined, 'console.warn');
                     } catch (_) {}
                     return original.apply(console, args);
                 };
@@ -2114,7 +2198,7 @@ websocket.send("FOUNDRY=dense_logs~100")
             }
         },
 
-        _recordError: function(signature, fullMessage) {
+        _recordError: function(signature, fullMessage, source = 'unknown') {
             try {
                 if (!config || !config.wsMonitor || !config.wsMonitor.enabled) return;
                 const cfg = config.wsMonitor;
@@ -2122,7 +2206,7 @@ websocket.send("FOUNDRY=dense_logs~100")
                 const signatureInfo = cfg.stats.signatures[signature] || { count: 0, lastSeen: 0 };
                 const elapsed = now - signatureInfo.lastSeen;
                 if (elapsed < this._throttleDelay) {
-                    logger.debug(`【WSMonitor】节流：距上次记录仅${elapsed}ms，忽略`);
+                    logger.debug(`【WSMonitor】节流：距上次记录仅${elapsed}ms，来源: ${source}`);
                     return;
                 }
                 signatureInfo.count++;
@@ -2132,7 +2216,7 @@ websocket.send("FOUNDRY=dense_logs~100")
                 cfg.stats.lastSeen = now;
                 config.save();
                 this._updateUI();
-                logger.warn(`【WSMonitor】检测到 WebSocket 错误 [${signature}]，累计：${cfg.stats.total} 次`);
+                logger.warn(`【WSMonitor】检测到 WS 错误 [${signature}]，来源: ${source}，累计：${cfg.stats.total} 次`);
             } catch (e) {
                 logger.error('【WSMonitor】记录错误失败:', e);
             }
@@ -5241,6 +5325,14 @@ websocket.send("FOUNDRY=dense_logs~100")
                 if (isWebSocketError) {
                     logger.info(`【错误重启】捕获到WebSocket错误: ${errorMessage.substring(0, 100)}...`);
                     featureManager.handleWebSocketError();
+                    // 如果WSMonitor已启用，也通知它
+                    if (typeof WSMonitor !== 'undefined' && typeof WSMonitor.capture === 'function') {
+                        try {
+                            WSMonitor.capture(errorMessage, 'errorRestart');
+                        } catch (e) {
+                            // 忽略WSMonitor错误，不影响错误重启功能
+                        }
+                    }
                 }
                 originalConsoleError.apply(console, arguments);
             };
@@ -5258,6 +5350,14 @@ websocket.send("FOUNDRY=dense_logs~100")
                     (event.error && event.error.message &&
                      event.error.message.includes('WebSocket is already in CLOSING or CLOSED state'))) {
                     logger.info(`【错误重启】通过window.error捕获WebSocket错误: ${errorMessage.substring(0, 100)}...`);
+                    if (typeof WSMonitor !== 'undefined' && typeof WSMonitor.capture === 'function') {
+                        try {
+                            const combinedMessage = errorMessage || (event.error && (event.error.message || event.error.toString())) || '';
+                            WSMonitor.capture(combinedMessage, 'errorRestart:window.error');
+                        } catch (e) {
+                            // 忽略WSMonitor错误
+                        }
+                    }
                     featureManager.handleWebSocketError();
                 }
             });
@@ -5274,6 +5374,13 @@ websocket.send("FOUNDRY=dense_logs~100")
                     (reason && reason.message &&
                      reason.message.includes('WebSocket is already in CLOSING or CLOSED state'))) {
                     logger.info(`【错误重启】通过unhandledrejection捕获WebSocket错误: ${errorMessage.substring(0, 100)}...`);
+                    if (typeof WSMonitor !== 'undefined' && typeof WSMonitor.capture === 'function') {
+                        try {
+                            WSMonitor.capture(errorMessage, 'errorRestart:unhandledrejection');
+                        } catch (e) {
+                            // 忽略WSMonitor错误
+                        }
+                    }
                     featureManager.handleWebSocketError();
                 }
             });
