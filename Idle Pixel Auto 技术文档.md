@@ -679,7 +679,7 @@ features.animalCollection = {
 1. 遍历 window/unsafeWindow 上的所有可能 socket 对象
 2. 为每个 socket 添加 error/close 监听器
 3. 挂钩 WebSocket 构造函数，自动为新建连接添加监听器
-4. 包装 WebSocket.prototype.send，捕获发送异常
+4. 包装 WebSocket.prototype.send，在调用前检查 readyState 并在 CLOSING/CLOSED 状态下触发错误重启
 5. 重写 console.error，捕获 WebSocket CLOSING/CLOSED 异常
 6. 监听 window error/unhandledrejection 事件
 

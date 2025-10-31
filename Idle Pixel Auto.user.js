@@ -3448,6 +3448,18 @@ websocket.send("FOUNDRY=dense_logs~100")
             if (typeof originalSend !== 'function') return;
 
             const wrappedSend = function(...args) {
+                if (typeof this.readyState === 'number' && (this.readyState === 2 || this.readyState === 3)) {
+                    const stateNames = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'];
+                    const stateName = stateNames[this.readyState] || this.readyState;
+                    logger.debug(`【错误重启】检测到WebSocket处于${stateName}状态，拦截send调用 (${label})`);
+
+                    if (config.features.errorRestart && config.features.errorRestart.enabled) {
+                        featureManager.handleWebSocketError();
+                    }
+
+                    return;
+                }
+
                 try {
                     return originalSend.apply(this, args);
                 } catch (err) {
@@ -3462,7 +3474,7 @@ websocket.send("FOUNDRY=dense_logs~100")
             try {
                 ctor.prototype.send = wrappedSend;
                 ctor.prototype.__ipa_ws_send_wrapped = true;
-                logger.info(`【错误重启】已包装${label}.WebSocket.send`);
+                logger.info(`【错误重启】已包装${label}.WebSocket.send（包含状态检查）`);
             } catch (e) {
                 logger.warn(`【错误重启】包装${label}.WebSocket.send失败:`, e);
             }
