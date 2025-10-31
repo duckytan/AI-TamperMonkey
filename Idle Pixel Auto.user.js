@@ -5863,13 +5863,86 @@ const __idlePixelAutoTargetWindow = (typeof unsafeWindow !== 'undefined' && unsa
                 const guard = getEarlyWebSocketGuard();
                 if (guard) {
                     console.log('[调试工具] 早期WebSocket守卫:', guard);
-                    console.log('- 事件积压队列:', guard.getBacklog());
+                    console.log('- 事件积压队列长度:', guard.getBacklog().length);
                     console.log('- 原始构造函数:', guard.originalConstructor);
                     console.log('- 劫持构造函数:', guard.hookedConstructor);
+                    
+                    // 统计事件类型
+                    const backlog = guard.getBacklog();
+                    const stats = {
+                        created: 0,
+                        'send-blocked': 0,
+                        'send-error': 0,
+                        error: 0,
+                        close: 0,
+                        open: 0
+                    };
+                    backlog.forEach(event => {
+                        if (stats.hasOwnProperty(event.type)) {
+                            stats[event.type]++;
+                        }
+                    });
+                    console.log('- 事件统计:', stats);
                 } else {
                     console.warn('[调试工具] 未找到早期WebSocket守卫');
                 }
                 return guard;
+            },
+
+            // 分析事件队列
+            analyzeEvents: function() {
+                const guard = getEarlyWebSocketGuard();
+                if (!guard) {
+                    console.warn('[调试工具] 未找到早期WebSocket守卫');
+                    return null;
+                }
+
+                const backlog = guard.getBacklog();
+                console.log(`[调试工具] 分析事件队列（共 ${backlog.length} 条）`);
+
+                const analysis = {
+                    total: backlog.length,
+                    byType: {},
+                    byUrl: {},
+                    recent: backlog.slice(-10),
+                    sendBlocked: [],
+                    errors: []
+                };
+
+                backlog.forEach(event => {
+                    // 按类型统计
+                    analysis.byType[event.type] = (analysis.byType[event.type] || 0) + 1;
+
+                    // 按 URL 统计
+                    const url = event.meta && event.meta.url || 'unknown';
+                    analysis.byUrl[url] = (analysis.byUrl[url] || 0) + 1;
+
+                    // 收集 send-blocked 事件
+                    if (event.type === 'send-blocked') {
+                        analysis.sendBlocked.push({
+                            timestamp: new Date(event.timestamp).toISOString(),
+                            state: event.stateName,
+                            url: url
+                        });
+                    }
+
+                    // 收集错误事件
+                    if (event.type === 'error' || event.type === 'send-error') {
+                        analysis.errors.push({
+                            timestamp: new Date(event.timestamp).toISOString(),
+                            type: event.type,
+                            url: url
+                        });
+                    }
+                });
+
+                console.log('事件类型分布:', analysis.byType);
+                console.log('URL 分布:', analysis.byUrl);
+                console.log(`Send 拦截次数: ${analysis.sendBlocked.length}`);
+                console.log(`错误次数: ${analysis.errors.length}`);
+                console.log('最近 10 条事件:', analysis.recent);
+
+                return analysis;
             },
 
             // 测试WebSocket状态拦截
@@ -6040,7 +6113,8 @@ const __idlePixelAutoTargetWindow = (typeof unsafeWindow !== 'undefined' && unsa
 === Idle Pixel Auto 调试工具 ===
 
 可用命令:
-  IPA.getEarlyGuard()        - 查看早期WebSocket守卫对象和事件队列
+  IPA.getEarlyGuard()        - 查看早期WebSocket守卫对象和事件队列（含统计）
+  IPA.analyzeEvents()        - 分析事件类型、URL分布、最近记录
   IPA.testWebSocketBlock()   - 测试WebSocket状态拦截功能
   IPA.getWSMonitorStats()    - 查看WSMonitor统计信息
   IPA.triggerWSMonitor(msg)  - 手动触发WSMonitor捕获测试
@@ -6059,8 +6133,8 @@ const __idlePixelAutoTargetWindow = (typeof unsafeWindow !== 'undefined' && unsa
   // 查看统计
   IPA.getWSMonitorStats()
   
-  // 启用详细日志
-  IPA.enableDebugLog()
+  // 分析事件
+  IPA.analyzeEvents()
   
   // 查看早期守卫
   const guard = IPA.getEarlyGuard()
