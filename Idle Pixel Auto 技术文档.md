@@ -819,12 +819,12 @@ COLLECT_ALL_LOOT_ANIMAL
 
 ### 5.3 错误处理与重试
 
-**错误检测**
+**错误检测（v2.7.2+）**
+- 采用早期守卫（Early Guard）在 `@run-at document-start` 时劫持 WebSocket
+- 包装 WebSocket 构造函数和 `send()` 方法，在 CLOSING/CLOSED 状态拦截
+- WSMonitor 模块提供 console 包装和事件监听
+- 早期守卫桥接（`setupEarlyWebSocketBridge`）将事件转发到监控和重启模块
 - `utils.safeClick()` 中捕获 WebSocket 相关 DOMException
-- `ensureWebSocketErrorListeners()` 添加 error/close 监听器
-- 包装 `WebSocket.prototype.send` 捕获发送异常
-- 重写 `console.error` 捕获输出中的 WebSocket 关键字
-- 监听 `window.error` 和 `unhandledrejection` 事件
 
 **错误关键字**
 ```javascript
@@ -1068,7 +1068,7 @@ for (const featureKey in config.features) {
     
     if (feature.enabled && meta.autoStart) {
         if (featureKey === 'errorRestart') {
-            ensureWebSocketErrorListeners();
+             setupEarlyWebSocketBridge();
         } else if (featureKey === 'timedRestart') {
             featureManager.toggleTimedRestart(true);
         } else if (feature.interval !== undefined) {
@@ -1399,7 +1399,7 @@ logger.error = (msg, ...args) => logToDebugOutput('error', msg, ...args);
    ```javascript
    console.log(window.websocket || window.socket);
    ```
-2. 确认 `ensureWebSocketErrorListeners()` 已运行
+2. 确认 `setupEarlyWebSocketBridge()` 已运行（查看控制台日志）
 3. 查看 2秒 + 30秒定时检查是否正常
 
 **问题：选择器失效**
@@ -1939,7 +1939,7 @@ featureManager.executeMyNewFeature = function() {
 - `toggleFeature(featureKey, enabled, options)`: 切换功能
 - `updateFeatureInterval(featureKey, interval)`: 更新功能间隔
 - `activateFurnaceAndStartSmelting()`: 激活熔炉并启动熔炼
-- `ensureWebSocketErrorListeners()`: 确保 WebSocket 错误监听器
+- `setupEarlyWebSocketBridge()`: 将早期守卫事件桥接到监控系统
 - `getFeatureMeta(featureKey)`: 获取功能元数据
 
 ---

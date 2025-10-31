@@ -69,7 +69,7 @@ const wrappedSend = function wrappedEarlySend(...args) {
 
 ### 模块2: 事件桥接（`setupEarlyWebSocketBridge`）
 
-**位置**：`Idle Pixel Auto.user.js` 第 3790-3882 行
+**位置**：`Idle Pixel Auto.user.js` 第 3606-3703 行
 
 **职责**：
 1. 从早期守卫注册监听器
@@ -333,6 +333,7 @@ copy(JSON.stringify(diagnostics, null, 2));
 
 | 版本 | 日期 | 主要更新 |
 |------|------|----------|
+| v2.7.2 | 2025-01-27 | 清理旧监听器，统一采用早期守卫方案 |
 | v2.7 | 2025-01-XX | 实施早期WebSocket守卫、IPA调试工具 |
 | v2.6 | 2025-10-24 | WSMonitor 独立监控模块 |
 | v2.5 | 2025-10-24 | 煤炭熔炼功能 |
@@ -367,5 +368,5 @@ copy(JSON.stringify(diagnostics, null, 2));
 ---
 
 **维护者**: Idle Pixel Auto Team  
-**最后更新**: 2025-01-XX  
-**文档版本**: v1.0
+**最后更新**: 2025-01-27  
+**文档版本**: v1.1
