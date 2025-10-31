@@ -12,6 +12,7 @@
 // @connect      idle-pixel.com
 // @connect      *
 // @license      MIT
+// @run-at       document-start
 // ==/UserScript==
 
 /*
@@ -212,10 +213,246 @@ websocket.send("FOUNDRY=dense_logs~100")
 
 */
 
+const __idlePixelAutoTargetWindow = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
+(function setupIdlePixelAutoEarlyWebSocketGuard(globalObj) {
+    try {
+        if (!globalObj) {
+            return;
+        }
+        if (globalObj.__idlePixelAutoEarlyWSGuard) {
+            return;
+        }
+
+        const OriginalWebSocket = globalObj.WebSocket;
+        if (typeof OriginalWebSocket !== 'function') {
+            return;
+        }
+
+        const stateNames = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'];
+        const trackedSockets = new WeakSet();
+        const metadataMap = new WeakMap();
+        const listeners = new Set();
+        const backlog = [];
+        const MAX_BACKLOG = 200;
+        const safeConsole = (globalObj.console && typeof globalObj.console.debug === 'function') ? globalObj.console : console;
+
+        const pushBacklog = (event) => {
+            backlog.push(event);
+            if (backlog.length > MAX_BACKLOG) {
+                backlog.shift();
+            }
+        };
+
+        const notify = (event) => {
+            try {
+                pushBacklog(event);
+                listeners.forEach(listener => {
+                    try {
+                        listener(event);
+                    } catch (listenerErr) {
+                        try {
+                            safeConsole.debug('[IdlePixelAuto][EarlyWS] listener error:', listenerErr);
+                        } catch (_) {}
+                    }
+                });
+            } catch (notifyErr) {
+                try {
+                    safeConsole.debug('[IdlePixelAuto][EarlyWS] notify error:', notifyErr);
+                } catch (_) {}
+            }
+        };
+
+        const registerListener = (listener, options = {}) => {
+            if (typeof listener !== 'function') {
+                return () => {};
+            }
+            if (options.replay !== false) {
+                backlog.forEach(event => {
+                    try {
+                        listener(event);
+                    } catch (_) {}
+                });
+            }
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+        };
+
+        const captureMeta = (ws, ctorArgs) => {
+            const existing = metadataMap.get(ws);
+            const meta = existing || {
+                id: Math.random().toString(36).slice(2),
+                createdAt: Date.now(),
+                ctorArgs,
+                url: null,
+                protocol: null
+            };
+            try { meta.url = ws && ws.url || meta.url; } catch (_) {}
+            try { meta.protocol = ws && ws.protocol || meta.protocol; } catch (_) {}
+            metadataMap.set(ws, meta);
+            return meta;
+        };
+
+        const wrapInstance = (ws, ctorArgs) => {
+            if (!ws || typeof ws !== 'object') {
+                return ws;
+            }
+            if (trackedSockets.has(ws)) {
+                return ws;
+            }
+            trackedSockets.add(ws);
+
+            const metaSnapshot = captureMeta(ws, ctorArgs);
+            notify({ type: 'created', ws, meta: metaSnapshot, timestamp: Date.now() });
+
+            const wrapSend = () => {
+                if (!ws || typeof ws.send !== 'function' || ws.send.__ipaEarlyWrapped) {
+                    return;
+                }
+                const originalSend = ws.send;
+                const wrappedSend = function wrappedEarlySend(...args) {
+                    const state = typeof this.readyState === 'number' ? this.readyState : -1;
+                    if (state === 2 || state === 3) {
+                        const stateName = stateNames[state] || String(state);
+                        const meta = captureMeta(this, ctorArgs);
+                        notify({
+                            type: 'send-blocked',
+                            state,
+                            stateName,
+                            ws: this,
+                            args,
+                            meta,
+                            timestamp: Date.now()
+                        });
+                        return undefined;
+                    }
+                    try {
+                        return originalSend.apply(this, args);
+                    } catch (error) {
+                        const stateName = stateNames[state] || String(state);
+                        const meta = captureMeta(this, ctorArgs);
+                        notify({
+                            type: 'send-error',
+                            state,
+                            stateName,
+                            error,
+                            ws: this,
+                            args,
+                            meta,
+                            timestamp: Date.now()
+                        });
+                        throw error;
+                    }
+                };
+                wrappedSend.__ipaEarlyWrapped = true;
+                wrappedSend.__ipaEarlyOriginal = originalSend;
+                try {
+                    ws.send = wrappedSend;
+                } catch (_) {
+                    try {
+                        const proto = Object.getPrototypeOf(ws);
+                        if (proto && typeof proto.send === 'function') {
+                            proto.send = wrappedSend;
+                        }
+                    } catch (_) {}
+                }
+            };
+
+            try {
+                wrapSend();
+            } catch (_) {}
+
+            const attachEvent = (eventName) => {
+                try {
+                    if (typeof ws.addEventListener === 'function') {
+                        ws.addEventListener(eventName, (event) => {
+                            const meta = captureMeta(ws, ctorArgs);
+                            notify({ type: eventName, event, ws, meta, timestamp: Date.now() });
+                        });
+                    }
+                } catch (_) {}
+            };
+
+            attachEvent('close');
+            attachEvent('error');
+            attachEvent('open');
+
+            return ws;
+        };
+
+        const HookedWebSocket = function HookedWebSocket(...args) {
+            const ws = new OriginalWebSocket(...args);
+            try {
+                wrapInstance(ws, args);
+            } catch (wrapErr) {
+                try {
+                    safeConsole.debug('[IdlePixelAuto][EarlyWS] wrapInstance error:', wrapErr);
+                } catch (_) {}
+            }
+            return ws;
+        };
+
+        try {
+            HookedWebSocket.prototype = OriginalWebSocket.prototype;
+            Object.setPrototypeOf(HookedWebSocket, OriginalWebSocket);
+        } catch (_) {}
+
+        globalObj.WebSocket = HookedWebSocket;
+
+        const scanTargets = [
+            'websocket', 'gameSocket', 'socket', 'ws',
+            'game_socket', 'connection', 'wsConnection', 'socketConnection',
+            'clientSocket', 'serverSocket', 'idleSocket', 'pixelSocket', 'idlePixelSocket'
+        ];
+
+        const scanExistingTargets = () => {
+            scanTargets.forEach(key => {
+                try {
+                    const value = globalObj[key];
+                    if (!value) return;
+                    if (typeof value.send === 'function') {
+                        wrapInstance(value, [`global.${key}`]);
+                        return;
+                    }
+                    if (value.websocket && typeof value.websocket.send === 'function') {
+                        wrapInstance(value.websocket, [`global.${key}.websocket`]);
+                    } else if (value.socket && typeof value.socket.send === 'function') {
+                        wrapInstance(value.socket, [`global.${key}.socket`]);
+                    }
+                } catch (_) {}
+            });
+        };
+
+        scanExistingTargets();
+        const pollerId = (typeof globalObj.setInterval === 'function')
+            ? globalObj.setInterval(scanExistingTargets, 1000)
+            : null;
+
+        globalObj.__idlePixelAutoEarlyWSGuard = {
+            originalConstructor: OriginalWebSocket,
+            hookedConstructor: HookedWebSocket,
+            registerListener,
+            wrapInstance,
+            scanExistingTargets,
+            getBacklog: () => backlog.slice(),
+            stopPolling: () => {
+                if (pollerId && typeof globalObj.clearInterval === 'function') {
+                    globalObj.clearInterval(pollerId);
+                }
+            },
+            stateNames
+        };
+    } catch (err) {
+        try {
+            const fallbackConsole = (globalObj && globalObj.console) ? globalObj.console : console;
+            fallbackConsole.warn('[IdlePixelAuto] Early WebSocket guard failed:', err);
+        } catch (_) {}
+    }
+})(__idlePixelAutoTargetWindow);
+
 (function() {
     'use strict';
 
-    const scriptVersion = '2.6';
+    const scriptVersion = '2.7';
     const featurePrefix = '【IdlePixelAuto】';
 
     // ================ 常量定义 ================
@@ -3548,6 +3785,100 @@ websocket.send("FOUNDRY=dense_logs~100")
 
             ensureConstructorHook(root, label);
         }
+    }
+
+    setupEarlyWebSocketBridge();
+
+    function setupEarlyWebSocketBridge() {
+        if (setupEarlyWebSocketBridge._initialized) {
+            return;
+        }
+        const guard = getEarlyWebSocketGuard();
+        if (!guard || typeof guard.registerListener !== 'function') {
+            logger.debug('【错误重启】未检测到早期WebSocket守卫，跳过桥接');
+            return;
+        }
+        setupEarlyWebSocketBridge._initialized = true;
+
+        const stateNames = Array.isArray(guard.stateNames) && guard.stateNames.length > 0
+            ? guard.stateNames
+            : ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'];
+
+        guard.registerListener((event) => {
+            try {
+                if (!event || !event.type) return;
+
+                const type = event.type;
+                const meta = event.meta || {};
+                const urlInfo = meta.url ? ` （${meta.url}）` : '';
+                const stateName = event.stateName || (typeof event.state === 'number' ? (stateNames[event.state] || String(event.state)) : '');
+
+                let shouldCountAsError = false;
+                let captureMessage = '';
+
+                if (type === 'send-blocked') {
+                    shouldCountAsError = true;
+                    const baseMessage = 'WebSocket is already in CLOSING or CLOSED state.';
+                    const extra = stateName && stateName !== 'CLOSING' && stateName !== 'CLOSED' ? ` [${stateName}]` : '';
+                    captureMessage = `${baseMessage}${extra}${urlInfo}`;
+                } else if (type === 'send-error') {
+                    shouldCountAsError = true;
+                    const err = event.error;
+                    const errMessage = err && (err.message || err.toString());
+                    captureMessage = errMessage || `WebSocket send error${urlInfo}`;
+                } else if (type === 'error') {
+                    shouldCountAsError = true;
+                    captureMessage = `WebSocket error${urlInfo}`;
+                } else if (type === 'close') {
+                    const closeEvent = event.event;
+                    if (closeEvent) {
+                        const wasClean = typeof closeEvent.wasClean === 'boolean' ? closeEvent.wasClean : undefined;
+                        const code = closeEvent.code;
+                        if (wasClean === false || (code && code !== 1000)) {
+                            shouldCountAsError = true;
+                            captureMessage = `WebSocket closed unexpectedly${urlInfo}（code=${code || 'unknown'}）`;
+                        }
+                    }
+                }
+
+                if (captureMessage) {
+                    WSMonitor.capture(captureMessage, `early-guard:${type}`);
+                }
+
+                if (shouldCountAsError && config.features.errorRestart && config.features.errorRestart.enabled) {
+                    featureManager.handleWebSocketError();
+                }
+            } catch (err) {
+                logger.debug('【错误重启】早期WebSocket守卫桥接处理异常:', err);
+            }
+        }, { replay: true });
+
+        logger.info('【错误重启】已连接早期WebSocket守卫事件流');
+    }
+
+    function getEarlyWebSocketGuard() {
+        const candidates = [];
+        try {
+            if (typeof __idlePixelAutoTargetWindow !== 'undefined' && __idlePixelAutoTargetWindow) {
+                candidates.push(__idlePixelAutoTargetWindow);
+            }
+        } catch (_) {}
+        try {
+            if (typeof unsafeWindow !== 'undefined' && unsafeWindow) {
+                candidates.push(unsafeWindow);
+            }
+        } catch (_) {}
+        if (typeof window !== 'undefined') {
+            candidates.push(window);
+        }
+        for (const candidate of candidates) {
+            try {
+                if (candidate && candidate.__idlePixelAutoEarlyWSGuard) {
+                    return candidate.__idlePixelAutoEarlyWSGuard;
+                }
+            } catch (_) {}
+        }
+        return null;
     }
 
     // 页面加载完成后确保WebSocket错误监听器已设置
