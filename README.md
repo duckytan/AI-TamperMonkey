@@ -116,6 +116,7 @@
 - `IPA.help()`：显示完整的命令说明
 - `IPA.testWebSocketBlock()`：快速自检 WebSocket CLOSING/CLOSED 状态拦截是否生效
 - `IPA.getWSMonitorStats()`：查看 WebSocket 监控统计
+- `IPA.analyzeEvents()`：分析事件类型/URL 分布，定位异常来源
 - `IPA.enableDebugLog()` / `IPA.disableDebugLog()`：切换日志级别
 - `IPA.listWebSockets()`：枚举当前页面已知的 WebSocket 实例
 

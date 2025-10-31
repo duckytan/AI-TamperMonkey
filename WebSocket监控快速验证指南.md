@@ -164,12 +164,16 @@ IPA.getWSMonitorStats()
 IPA.getErrorRestartStatus()
 ```
 
-### 查看早期守卫事件队列
+### 分析事件分布
 
 ```javascript
+// 快速分析事件类型、URL、错误分布
+IPA.analyzeEvents()
+
+// 或者手动获取队列
 const guard = IPA.getEarlyGuard()
 const backlog = guard.getBacklog()
-console.log('事件队列:', backlog)
+console.log('事件队列长度:', backlog.length)
 console.log('最近10个事件:', backlog.slice(-10))
 ```
 

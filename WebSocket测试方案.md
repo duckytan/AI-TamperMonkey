@@ -644,6 +644,7 @@ if (window.idlePixelLogger) {
 | `IPA.getErrorRestartStatus()` | 查看错误重启模块的状态（阈值、计数、定时器等） |
 | `IPA.resetWSMonitor()` | 重置 WSMonitor 统计数据 |
 | `IPA.resetErrorCount()` | 重置错误重启计数 |
+| `IPA.analyzeEvents()` | 输出事件类型/URL 分布与最近记录，定位异常来源 |
 | `IPA.listWebSockets()` | 枚举常见的全局 WebSocket 变量（window.websocket 等） |
 | `IPA.enableDebugLog()` | 将日志级别切换为 DEBUG |
 | `IPA.disableDebugLog()` | 将日志级别恢复为 INFO |
