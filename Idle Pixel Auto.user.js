@@ -17,44 +17,28 @@
 
 /*
 更新日志：
-v2.7 (2025-01-XX) - 代码架构重构版
-【架构优化】
-1. 重构：创建 constants 对象，集中管理所有常量（矿石、木材、船型、战斗区域等）
-2. 重构：创建 defaultFeatureConfigs 对象，统一管理12个功能的默认配置，消除重复定义
-3. 重构：创建 featureMetadata 对象，统一管理功能元数据（名称、日志前缀、分类、自动启动标记）
-4. 新增：getFeatureMeta(key) 通用元数据查询函数，支持默认值合并
+v2.7 (2025-01-XX) - WebSocket 早期守卫 & 调试工具
+【核心能力】
+1. 新增：`@run-at document-start`，在页面任何脚本执行前注入
+2. 新增：`setupIdlePixelAutoEarlyWebSocketGuard` 早期守卫模块，劫持 WebSocket 构造函数与 send 方法
+3. 新增：自动扫描 `window.websocket`/`gameSocket` 等全局引用，确保所有实例都被包装
+4. 新增：事件队列（默认保存 200 条）与监听器注册机制，统一转发到 WSMonitor / 错误重启
+5. 新增：`setupEarlyWebSocketBridge`，将早期守卫事件桥接到现有监控体系
 
-【模块化重构】
-5. 重构：WebSocket 操作模块化为 webSocketHelper，统一 socket 查找/发送/验证逻辑
-6. 重构：工具函数拆分为 utils.common（通用工具）和 utils.dom（DOM操作），增强复用性
-7. 重构：elementFinders 优化，提取 _parseCountFromElement 和 _findByDataKey 公共方法
-8. 优化：所有核心模块添加完整 JSDoc 注释（logger, config, featureManager等）
+【监控与重启】
+6. send() 在 CLOSING/CLOSED 状态时直接拦截并计入 WSMonitor
+7. 错误重启功能与 WSMonitor 打通，确保错误计数与统计数据同步
+8. close/error 事件收集，支持根据 wasClean / code 判定异常关闭
 
-【消除硬编码】
-9. 重构：updateFeatureInterval 使用元数据替代硬编码前缀（消除12+处硬编码）
-10. 重构：stopFeature 使用元数据替代硬编码前缀（消除9处硬编码）
-11. 重构：toggleFeature 使用元数据替代硬编码前缀（消除9处硬编码）
-12. 重构：startTimedFeature 创建 _featureExecutors 执行器映射表（消除40行if-else）
+【调试体验】
+9. 新增：`window.IPA` 调试工具集（unsafeWindow 同步）
+10. 支持 `IPA.testWebSocketBlock()`、`IPA.getWSMonitorStats()`、`IPA.listWebSockets()` 等十余个命令
+11. 默认提示 `IPA.help()`，快速查看可用命令
+12. 提供快速验证文档《WebSocket监控快速验证指南.md》
 
-【UI重构】
-13. 新增：uiBuilder.createFeatureRow() 通用UI构建器，支持数据驱动UI生成
-14. 重构：8个功能UI使用 uiBuilder 重构（石油、树木、渔船、陷阱、动物、战斗、矿石、煤炭）
-15. 优化：UI同步工具 syncSelectValue/syncInputValue，减少重复DOM操作代码
-16. 优化：manuallyAddedFeatures 数组优化长条件判断，提升可读性
-
-【代码质量】
-17. 优化：自动启动功能改为通过 featureMetadata.autoStart 数据驱动
-18. 完善：系统分区（重启控制、错误重启、定时重启、WS监控）添加详细注释
-19. 优化：配置验证使用 constants 对象，提升严格性
-20. 优化：日志级别默认INFO，注释更准确
-21. 审查：代码质量A级，无var/debugger/直接console调用/TODO标记
-
-【性能提升】
-- 硬编码减少约95%（约200处改为数据驱动）
-- 重复代码减少约70%（约300-400行）
-- 模块化程度提升至85%
-- 可维护性提升至90%
-- 代码文档化程度45%（所有核心模块）
+【文档更新】
+13. README 新增调试工具说明
+14. WebSocket 测试方案文档补充 IPA 调试命令及实际测试记录
 
 v2.6 (2025-10-24)
 1. 新增：独立 WebSocket 错误监控模块（WSMonitor），默认关闭且不干扰其他功能
@@ -5868,9 +5852,241 @@ const __idlePixelAutoTargetWindow = (typeof unsafeWindow !== 'undefined' && unsa
     // 在脚本加载时立即设置鼠标位置跟踪，确保第三方脚本访问不会报错
     setupGlobalMouseTracking();
 
+    // ================ 调试工具与控制台命令 ================
+    /**
+     * 暴露调试工具到全局对象，方便在控制台中测试和调试
+     */
+    function exposeDebugTools() {
+        const debugTools = {
+            // 获取早期WebSocket守卫
+            getEarlyGuard: function() {
+                const guard = getEarlyWebSocketGuard();
+                if (guard) {
+                    console.log('[调试工具] 早期WebSocket守卫:', guard);
+                    console.log('- 事件积压队列:', guard.getBacklog());
+                    console.log('- 原始构造函数:', guard.originalConstructor);
+                    console.log('- 劫持构造函数:', guard.hookedConstructor);
+                } else {
+                    console.warn('[调试工具] 未找到早期WebSocket守卫');
+                }
+                return guard;
+            },
+
+            // 测试WebSocket状态拦截
+            testWebSocketBlock: function() {
+                console.log('[调试工具] 开始测试WebSocket状态拦截...');
+                try {
+                    const ws = new WebSocket('wss://echo.websocket.org/');
+                    console.log('[调试工具] WebSocket已创建:', ws);
+                    
+                    ws.addEventListener('open', () => {
+                        console.log('[调试工具] WebSocket已连接');
+                        console.log('[调试工具] 立即关闭连接并尝试发送...');
+                        ws.close();
+                        
+                        setTimeout(() => {
+                            console.log('[调试工具] 尝试在CLOSING/CLOSED状态下发送消息...');
+                            const state = ws.readyState;
+                            console.log('[调试工具] 当前状态:', ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][state]);
+                            try {
+                                ws.send('test message');
+                                console.log('[调试工具] send()调用完成（可能被拦截）');
+                            } catch (e) {
+                                console.log('[调试工具] send()抛出异常:', e.message);
+                            }
+                        }, 100);
+                    });
+
+                    ws.addEventListener('error', (e) => {
+                        console.log('[调试工具] WebSocket错误事件:', e);
+                    });
+
+                    ws.addEventListener('close', (e) => {
+                        console.log('[调试工具] WebSocket关闭事件:', e);
+                    });
+
+                    return ws;
+                } catch (e) {
+                    console.error('[调试工具] 测试失败:', e);
+                    return null;
+                }
+            },
+
+            // 查看WSMonitor统计
+            getWSMonitorStats: function() {
+                if (typeof WSMonitor !== 'undefined') {
+                    const stats = WSMonitor.getStats();
+                    console.log('[调试工具] WSMonitor统计:', stats);
+                    return stats;
+                } else {
+                    console.warn('[调试工具] WSMonitor未定义');
+                    return null;
+                }
+            },
+
+            // 手动触发WSMonitor捕获
+            triggerWSMonitor: function(message) {
+                if (typeof WSMonitor !== 'undefined') {
+                    const msg = message || 'WebSocket is already in CLOSING or CLOSED state.';
+                    console.log('[调试工具] 手动触发WSMonitor捕获:', msg);
+                    WSMonitor.capture(msg, 'debug-manual');
+                    return true;
+                } else {
+                    console.warn('[调试工具] WSMonitor未定义');
+                    return false;
+                }
+            },
+
+            // 查看错误重启状态
+            getErrorRestartStatus: function() {
+                if (typeof featureManager !== 'undefined' && featureManager.restart) {
+                    const status = {
+                        errorEnabled: featureManager.restart.errorEnabled,
+                        errorThreshold: featureManager.restart.errorThreshold,
+                        errorCount: featureManager.restart.errorCount,
+                        timerEnabled: featureManager.restart.timerEnabled,
+                        timerSeconds: featureManager.restart.timerSeconds,
+                        timerRemaining: featureManager.restart.timerRemaining,
+                        url: featureManager.restart.url
+                    };
+                    console.log('[调试工具] 错误重启状态:', status);
+                    return status;
+                } else {
+                    console.warn('[调试工具] featureManager未定义或无restart属性');
+                    return null;
+                }
+            },
+
+            // 重置WSMonitor统计
+            resetWSMonitor: function() {
+                if (typeof WSMonitor !== 'undefined') {
+                    WSMonitor.reset();
+                    console.log('[调试工具] WSMonitor统计已重置');
+                    return true;
+                } else {
+                    console.warn('[调试工具] WSMonitor未定义');
+                    return false;
+                }
+            },
+
+            // 重置错误计数
+            resetErrorCount: function() {
+                if (typeof featureManager !== 'undefined') {
+                    featureManager.resetWebSocketErrorCount();
+                    console.log('[调试工具] 错误重启计数已重置');
+                    return true;
+                } else {
+                    console.warn('[调试工具] featureManager未定义');
+                    return false;
+                }
+            },
+
+            // 显示所有WebSocket实例
+            listWebSockets: function() {
+                console.log('[调试工具] 查找全局WebSocket实例...');
+                const candidates = [
+                    'websocket', 'gameSocket', 'socket', 'ws',
+                    'game_socket', 'connection', 'wsConnection', 'socketConnection',
+                    'clientSocket', 'serverSocket', 'idleSocket', 'pixelSocket', 'idlePixelSocket'
+                ];
+                const found = [];
+                candidates.forEach(name => {
+                    try {
+                        const obj = window[name];
+                        if (obj && typeof obj === 'object') {
+                            if (typeof obj.send === 'function') {
+                                found.push({
+                                    name: name,
+                                    object: obj,
+                                    readyState: obj.readyState,
+                                    url: obj.url,
+                                    protocol: obj.protocol
+                                });
+                            }
+                        }
+                    } catch (e) {}
+                });
+                console.log('[调试工具] 找到的WebSocket实例:', found);
+                return found;
+            },
+
+            // 启用详细日志
+            enableDebugLog: function() {
+                if (typeof logger !== 'undefined') {
+                    logger.setLevel('DEBUG');
+                    console.log('[调试工具] 已启用DEBUG级别日志');
+                    return true;
+                } else {
+                    console.warn('[调试工具] logger未定义');
+                    return false;
+                }
+            },
+
+            // 禁用详细日志
+            disableDebugLog: function() {
+                if (typeof logger !== 'undefined') {
+                    logger.setLevel('INFO');
+                    console.log('[调试工具] 已切换回INFO级别日志');
+                    return true;
+                } else {
+                    console.warn('[调试工具] logger未定义');
+                    return false;
+                }
+            },
+
+            // 显示帮助信息
+            help: function() {
+                console.log(`
+=== Idle Pixel Auto 调试工具 ===
+
+可用命令:
+  IPA.getEarlyGuard()        - 查看早期WebSocket守卫对象和事件队列
+  IPA.testWebSocketBlock()   - 测试WebSocket状态拦截功能
+  IPA.getWSMonitorStats()    - 查看WSMonitor统计信息
+  IPA.triggerWSMonitor(msg)  - 手动触发WSMonitor捕获测试
+  IPA.getErrorRestartStatus()- 查看错误重启状态
+  IPA.resetWSMonitor()       - 重置WSMonitor统计
+  IPA.resetErrorCount()      - 重置错误重启计数
+  IPA.listWebSockets()       - 列出所有全局WebSocket实例
+  IPA.enableDebugLog()       - 启用DEBUG级别日志
+  IPA.disableDebugLog()      - 切换回INFO级别日志
+  IPA.help()                 - 显示此帮助信息
+
+示例用法:
+  // 测试WebSocket拦截
+  IPA.testWebSocketBlock()
+  
+  // 查看统计
+  IPA.getWSMonitorStats()
+  
+  // 启用详细日志
+  IPA.enableDebugLog()
+  
+  // 查看早期守卫
+  const guard = IPA.getEarlyGuard()
+  console.log(guard.getBacklog())
+                `);
+            }
+        };
+
+        // 暴露到全局
+        try {
+            if (typeof unsafeWindow !== 'undefined' && unsafeWindow) {
+                unsafeWindow.IPA = debugTools;
+                console.log('[IdlePixelAuto] 调试工具已暴露到 unsafeWindow.IPA');
+            }
+        } catch (e) {}
+        
+        window.IPA = debugTools;
+        console.log('[IdlePixelAuto] 调试工具已暴露到 window.IPA');
+        console.log('[IdlePixelAuto] 输入 IPA.help() 查看可用命令');
+    }
+
     // 当页面加载完成后开始执行
     window.addEventListener('load', function() {
         init();
+        // 延迟暴露调试工具，确保所有模块已初始化
+        setTimeout(exposeDebugTools, 1000);
     });
 
 })();

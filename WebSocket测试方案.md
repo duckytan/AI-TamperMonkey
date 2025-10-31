@@ -630,14 +630,37 @@ if (window.idlePixelLogger) {
 }
 ```
 
+### 调试控制台命令（IPA 调试工具）
+
+脚本加载完成后会在 `window.IPA`（以及 `unsafeWindow.IPA`）导出以下调试函数，方便快速验证：
+
+| 命令 | 说明 |
+|------|------|
+| `IPA.help()` | 显示完整的命令帮助列表 |
+| `IPA.getEarlyGuard()` | 查看早期 WebSocket 守卫对象、事件积压队列等信息 |
+| `IPA.testWebSocketBlock()` | 创建一个 WebSocket → 关闭后再发送，验证 send 拦截逻辑 |
+| `IPA.getWSMonitorStats()` | 输出 WSMonitor 当前统计 |
+| `IPA.triggerWSMonitor(msg)` | 手动向 WSMonitor 注入一条记录（默认消息为 CLOSING/CLOSED 状态） |
+| `IPA.getErrorRestartStatus()` | 查看错误重启模块的状态（阈值、计数、定时器等） |
+| `IPA.resetWSMonitor()` | 重置 WSMonitor 统计数据 |
+| `IPA.resetErrorCount()` | 重置错误重启计数 |
+| `IPA.listWebSockets()` | 枚举常见的全局 WebSocket 变量（window.websocket 等） |
+| `IPA.enableDebugLog()` | 将日志级别切换为 DEBUG |
+| `IPA.disableDebugLog()` | 将日志级别恢复为 INFO |
+
+示例：
+```javascript
+IPA.help();                      // 查看帮助
+IPA.testWebSocketBlock();        // 快速自检 send 拦截是否生效
+IPA.getWSMonitorStats();         // 查看统计数据
+IPA.enableDebugLog();            // 临时开启详细日志
+```
+
 ### 临时启用详细日志
 
 ```javascript
 // 在控制台中执行
-if (window.idlePixelLogger) {
-    window.idlePixelLogger.setLevel('DEBUG');
-    console.log('已切换到DEBUG级别日志');
-}
+IPA.enableDebugLog();
 ```
 
 ### 监控特定WebSocket实例

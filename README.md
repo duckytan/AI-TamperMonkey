@@ -107,6 +107,19 @@
 | **日志系统** | 多级日志（DEBUG/INFO/WARN/ERROR） | 日志级别 |
 | **调试面板** | 实时日志输出，支持级别过滤 | 显示开关（debug/info/warn/error） |
 | **WebSocket 监控** | 独立监控 WebSocket 异常，统计异常签名 | 启用开关、统计信息 |
+| **调试工具（IPA）** | 控制台命令集，用于测试和诊断 | 通过 `IPA.help()` 查看 |
+
+#### 调试工具（IPA）快速上手
+脚本初始化完成后会在浏览器控制台暴露 `window.IPA`（Tampermonkey 环境下也会同步到 `unsafeWindow.IPA`）。
+
+常用命令：
+- `IPA.help()`：显示完整的命令说明
+- `IPA.testWebSocketBlock()`：快速自检 WebSocket CLOSING/CLOSED 状态拦截是否生效
+- `IPA.getWSMonitorStats()`：查看 WebSocket 监控统计
+- `IPA.enableDebugLog()` / `IPA.disableDebugLog()`：切换日志级别
+- `IPA.listWebSockets()`：枚举当前页面已知的 WebSocket 实例
+
+> 更多调试技巧可参考附带文档 **《WebSocket监控快速验证指南.md》**。
 
 ---
 
