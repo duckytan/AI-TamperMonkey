@@ -4,7 +4,7 @@
 
 **功能强大的 Idle Pixel 游戏自动化脚本**
 
-[![Version](https://img.shields.io/badge/version-2.7-blue.svg)](https://github.com/your-repo/idle-pixel-auto)
+[![Version](https://img.shields.io/badge/version-2.7.2-blue.svg)](https://github.com/your-repo/idle-pixel-auto)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-v4.19%2B-orange.svg)](https://www.tampermonkey.net/)
 
@@ -1023,6 +1023,12 @@ A: 游戏 UI 改版可能导致元素定位失败：
 完整更新日志请查看脚本文件顶部的注释，或访问仓库的 [Releases](https://github.com/your-repo/idle-pixel-auto/releases) 页面。
 
 ### 近期版本亮点
+
+#### v2.7.2 (2025-01-27) - WebSocket 监控优化版
+- 🧹 移除旧的 WebSocket 错误监听器包装方法，彻底消除冲突风险
+- 🔄 清理 console.error 重写方案，统一使用早期守卫（Early Guard）
+- 🕸️ 早期守卫桥接完善：事件统一流向 WSMonitor 与错误重启功能
+- 🧰 IPA 调试工具继续强化，支持守卫事件分析与自检
 
 #### v2.7 (2025-01-XX) - 代码架构重构版
 - ✨ 创建 constants、defaultFeatureConfigs、featureMetadata 对象，统一管理配置和元数据

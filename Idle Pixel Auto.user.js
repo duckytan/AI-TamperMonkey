@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Idle Pixel Auto
 // @namespace    http://tampermonkey.net/
-// @version      2.7.1
+// @version      2.7.2
 // @description  自动进行Idle Pixel游戏中的各种操作
 // @author       Duckyの復活
 // @match        https://idle-pixel.com/login/play/
@@ -17,6 +17,14 @@
 
 /*
 更新日志：
+v2.7.2 (2025-01-27) - WebSocket 监控优化与代码清理
+【核心优化】
+1. 清理：移除旧的 WebSocket 监听器包装方法（ensureWebSocketErrorListeners）
+2. 清理：移除旧的 console.error 重写方法（setupWebSocketErrorMonitoring）
+3. 优化：统一使用早期守卫（Early Guard）作为唯一的 WebSocket 错误拦截方案
+4. 改进：简化错误重启功能，完全依赖早期守卫桥接
+5. 文档：更新注释说明当前采用的 WebSocket 监控方案
+
 v2.7.1 (2025-01-27) - 增强事件分析能力
 【调试工具增强】
 1. 新增：`IPA.analyzeEvents()` 命令，支持事件类型/URL分布分析
@@ -443,7 +451,7 @@ const __idlePixelAutoTargetWindow = (typeof unsafeWindow !== 'undefined' && unsa
 (function() {
     'use strict';
 
-    const scriptVersion = '2.7.1';
+    const scriptVersion = '2.7.2';
     const featurePrefix = '【IdlePixelAuto】';
 
     // ================ 常量定义 ================
@@ -3575,7 +3583,7 @@ const __idlePixelAutoTargetWindow = (typeof unsafeWindow !== 'undefined' && unsa
             } else if (featureKey === 'errorRestart') {
                 logger.debug(`${meta.prefix}功能已启用，重置错误计数`);
                 featureManager.resetWebSocketErrorCount();
-                ensureWebSocketErrorListeners();
+                setupEarlyWebSocketBridge();
             } else if (featureKey === 'timedRestart') {
                 logger.debug(`${meta.prefix}功能已启用，设置定时重启`);
                 featureManager.toggleTimedRestart(true);
@@ -3595,189 +3603,11 @@ const __idlePixelAutoTargetWindow = (typeof unsafeWindow !== 'undefined' && unsa
         }
     }
 
-    // 确保WebSocket错误监听器已设置
-    function ensureWebSocketErrorListeners() {
-        const SOCKET_FLAG = '__ipa_ws_error_listener_added';
-        const HOOK_FLAG = '__ipa_ws_hooked';
-        const ORIGINAL_CTOR_KEY = '__ipa_ws_original_constructor';
-
-        const roots = [];
-        try {
-            if (typeof unsafeWindow !== 'undefined' && unsafeWindow) {
-                roots.push({ root: unsafeWindow, label: 'unsafeWindow' });
-            }
-        } catch (e) {
-            logger.debug('【错误重启】访问unsafeWindow时出错:', e);
-        }
-        roots.push({ root: window, label: 'window' });
-
-        const allPossibleSocketNames = [
-            'gameSocket', 'websocket', 'socket', 'ws',
-            'game_socket', 'connection', 'wsConnection', 'socketConnection',
-            'clientSocket', 'serverSocket', 'webSocket', 'gameConnection',
-            'idleSocket', 'pixelSocket', 'idlePixelSocket', 'gameClient',
-            'socketClient', 'wsClient', 'connectionClient', 'gameWS'
-        ];
-        const gameObjects = ['Game', 'IdleGame', 'PixelGame', 'MainGame', 'IdlePixel'];
-        const processedRoots = new Set();
-
-        const addListeners = (socket, label) => {
-            if (!socket || typeof socket !== 'object') return;
-            if (typeof socket.send !== 'function') return;
-            if (socket[SOCKET_FLAG] || socket._errorRestartListenerAdded) return;
-
-            const triggerErrorCount = (eventType, event) => {
-                if (!(config.features.errorRestart && config.features.errorRestart.enabled)) {
-                    return;
-                }
-                if (eventType === 'close') {
-                    if (!event || event.wasClean === false) {
-                        featureManager.handleWebSocketError();
-                    }
-                } else {
-                    featureManager.handleWebSocketError();
-                }
-            };
-
-            const onError = () => triggerErrorCount('error');
-            const onClose = (event) => triggerErrorCount('close', event);
-
-            try {
-                if (typeof socket.addEventListener === 'function') {
-                    socket.addEventListener('error', onError);
-                    socket.addEventListener('close', onClose);
-                } else {
-                    const originalOnError = socket.onerror;
-                    socket.onerror = function(...args) {
-                        try { onError.apply(this, args); } catch (hookErr) { logger.debug('【错误重启】处理socket.onerror时出错:', hookErr); }
-                        if (typeof originalOnError === 'function') {
-                            try { return originalOnError.apply(this, args); } catch (originalErr) { logger.error('【错误重启】socket.onerror原始处理异常:', originalErr); }
-                        }
-                    };
-                    const originalOnClose = socket.onclose;
-                    socket.onclose = function(event, ...rest) {
-                        try { onClose.call(this, event); } catch (hookErr) { logger.debug('【错误重启】处理socket.onclose时出错:', hookErr); }
-                        if (typeof originalOnClose === 'function') {
-                            try { return originalOnClose.call(this, event, ...rest); } catch (originalErr) { logger.error('【错误重启】socket.onclose原始处理异常:', originalErr); }
-                        }
-                    };
-                }
-                socket[SOCKET_FLAG] = true;
-                socket._errorRestartListenerAdded = true;
-                logger.debug(`【错误重启】已为 ${label} 添加错误监听器`);
-            } catch (e) {
-                logger.warn(`【错误重启】为 ${label} 添加监听器时出错:`, e);
-            }
-        };
-
-        const wrapSend = (ctor, label) => {
-            if (!ctor || !ctor.prototype || ctor.prototype.__ipa_ws_send_wrapped) return;
-            const originalSend = ctor.prototype.send;
-            if (typeof originalSend !== 'function') return;
-
-            const wrappedSend = function(...args) {
-                if (typeof this.readyState === 'number' && (this.readyState === 2 || this.readyState === 3)) {
-                    const stateNames = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'];
-                    const stateName = stateNames[this.readyState] || this.readyState;
-                    logger.debug(`【错误重启】检测到WebSocket处于${stateName}状态，拦截send调用 (${label})`);
-
-                    if (config.features.errorRestart && config.features.errorRestart.enabled) {
-                        featureManager.handleWebSocketError();
-                    }
-
-                    return;
-                }
-
-                try {
-                    return originalSend.apply(this, args);
-                } catch (err) {
-                    logger.debug(`【错误重启】捕获WebSocket.send异常 (${label}):`, err);
-                    if (config.features.errorRestart && config.features.errorRestart.enabled) {
-                        featureManager.handleWebSocketError();
-                    }
-                    throw err;
-                }
-            };
-
-            try {
-                ctor.prototype.send = wrappedSend;
-                ctor.prototype.__ipa_ws_send_wrapped = true;
-                logger.info(`【错误重启】已包装${label}.WebSocket.send（包含状态检查）`);
-            } catch (e) {
-                logger.warn(`【错误重启】包装${label}.WebSocket.send失败:`, e);
-            }
-        };
-
-        const ensureConstructorHook = (root, label) => {
-            try {
-                if (!root || typeof root.WebSocket !== 'function') return;
-
-                if (!root[ORIGINAL_CTOR_KEY]) {
-                    root[ORIGINAL_CTOR_KEY] = root.WebSocket;
-                }
-
-                const OriginalWebSocket = root[ORIGINAL_CTOR_KEY];
-
-                if (!root[HOOK_FLAG]) {
-                    const HookedWebSocket = function(...args) {
-                        const ws = new OriginalWebSocket(...args);
-                        addListeners(ws, `${label}.WebSocket实例`);
-                        return ws;
-                    };
-                    HookedWebSocket.prototype = OriginalWebSocket.prototype;
-                    Object.setPrototypeOf(HookedWebSocket, OriginalWebSocket);
-                    root.WebSocket = HookedWebSocket;
-                    root[HOOK_FLAG] = true;
-                    logger.info(`【错误重启】已挂钩${label}.WebSocket构造函数`);
-                }
-
-                wrapSend(OriginalWebSocket, label);
-            } catch (e) {
-                logger.warn(`【错误重启】挂钩${label}.WebSocket失败:`, e);
-            }
-        };
-
-        for (const { root, label } of roots) {
-            if (!root || processedRoots.has(root)) continue;
-            processedRoots.add(root);
-
-            for (const socketName of allPossibleSocketNames) {
-                try {
-                    const socket = root[socketName];
-                    if (socket) {
-                        addListeners(socket, `${label}.${socketName}`);
-                    }
-                } catch (e) { /* ignore */ }
-            }
-
-            for (const gameObjName of gameObjects) {
-                try {
-                    const gameObj = root[gameObjName];
-                    if (!gameObj) continue;
-                    if (gameObj.socket) addListeners(gameObj.socket, `${label}.${gameObjName}.socket`);
-                    if (gameObj.connection) addListeners(gameObj.connection, `${label}.${gameObjName}.connection`);
-                    if (gameObj.ws) addListeners(gameObj.ws, `${label}.${gameObjName}.ws`);
-                } catch (e) { /* ignore */ }
-            }
-
-            try {
-                const keys = Object.keys(root).filter(k => /(socket|ws)/i.test(k));
-                for (const key of keys) {
-                    try {
-                        const socket = root[key];
-                        if (socket) {
-                            addListeners(socket, `${label}['${key}']`);
-                        }
-                    } catch (e) { /* ignore */ }
-                }
-            } catch (e) {
-                // ignore
-            }
-
-            ensureConstructorHook(root, label);
-        }
-    }
-
+    /**
+     * ================ WebSocket 早期守卫桥接 ================
+     * 连接早期守卫到错误重启和监控系统
+     * 这是 WebSocket 错误拦截的核心方案
+     */
     setupEarlyWebSocketBridge();
 
     function setupEarlyWebSocketBridge() {
@@ -3871,12 +3701,6 @@ const __idlePixelAutoTargetWindow = (typeof unsafeWindow !== 'undefined' && unsa
         }
         return null;
     }
-
-    // 页面加载完成后确保WebSocket错误监听器已设置
-    setTimeout(ensureWebSocketErrorListeners, 2000);
-    // 每30秒检查一次WebSocket实例并添加监听器
-    setInterval(ensureWebSocketErrorListeners, 30000);
-
 
     function updateFeatureInterval(featureKey, interval) {
         const meta = getFeatureMeta(featureKey);
@@ -5641,95 +5465,6 @@ const __idlePixelAutoTargetWindow = (typeof unsafeWindow !== 'undefined' && unsa
                 errorCountElement.textContent = count.toString();
             }
         };
-
-        // WebSocket错误监听
-        const setupWebSocketErrorMonitoring = () => {
-            // 重写console.error来捕获WebSocket错误
-            const originalConsoleError = console.error;
-            console.error = function() {
-                const errorMessage = Array.from(arguments).join(' ');
-                // 捕获更多WebSocket相关错误
-                const isWebSocketError =
-                    errorMessage.includes('WebSocket is already in CLOSING or CLOSED state') ||
-                    errorMessage.includes('WebSocket connection failed') ||
-                    errorMessage.includes('Connection reset') ||
-                    errorMessage.includes('ERR_CONNECTION_RESET') ||
-                    errorMessage.toLowerCase().includes('websocket');
-
-                if (isWebSocketError) {
-                    logger.info(`【错误重启】捕获到WebSocket错误: ${errorMessage.substring(0, 100)}...`);
-                    featureManager.handleWebSocketError();
-                    // 如果WSMonitor已启用，也通知它
-                    if (typeof WSMonitor !== 'undefined' && typeof WSMonitor.capture === 'function') {
-                        try {
-                            WSMonitor.capture(errorMessage, 'errorRestart');
-                        } catch (e) {
-                            // 忽略WSMonitor错误，不影响错误重启功能
-                        }
-                    }
-                }
-                originalConsoleError.apply(console, arguments);
-            };
-
-            // 监听全局错误
-            window.addEventListener('error', (event) => {
-                // 检查是否是WebSocket错误
-                const errorMessage = event.message || '';
-                const isWebSocketError =
-                    errorMessage.includes('WebSocket is already in CLOSING or CLOSED state') ||
-                    errorMessage.includes('ERR_CONNECTION_RESET') ||
-                    errorMessage.toLowerCase().includes('websocket');
-
-                if (isWebSocketError ||
-                    (event.error && event.error.message &&
-                     event.error.message.includes('WebSocket is already in CLOSING or CLOSED state'))) {
-                    logger.info(`【错误重启】通过window.error捕获WebSocket错误: ${errorMessage.substring(0, 100)}...`);
-                    if (typeof WSMonitor !== 'undefined' && typeof WSMonitor.capture === 'function') {
-                        try {
-                            const combinedMessage = errorMessage || (event.error && (event.error.message || event.error.toString())) || '';
-                            WSMonitor.capture(combinedMessage, 'errorRestart:window.error');
-                        } catch (e) {
-                            // 忽略WSMonitor错误
-                        }
-                    }
-                    featureManager.handleWebSocketError();
-                }
-            });
-
-            // 监听未处理的Promise拒绝
-            window.addEventListener('unhandledrejection', (event) => {
-                const reason = event.reason || {};
-                const errorMessage = reason.message || '';
-                const isWebSocketError =
-                    errorMessage.includes('WebSocket is already in CLOSING or CLOSED state') ||
-                    errorMessage.toLowerCase().includes('websocket');
-
-                if (isWebSocketError ||
-                    (reason && reason.message &&
-                     reason.message.includes('WebSocket is already in CLOSING or CLOSED state'))) {
-                    logger.info(`【错误重启】通过unhandledrejection捕获WebSocket错误: ${errorMessage.substring(0, 100)}...`);
-                    if (typeof WSMonitor !== 'undefined' && typeof WSMonitor.capture === 'function') {
-                        try {
-                            WSMonitor.capture(errorMessage, 'errorRestart:unhandledrejection');
-                        } catch (e) {
-                            // 忽略WSMonitor错误
-                        }
-                    }
-                    featureManager.handleWebSocketError();
-                }
-            });
-
-            // 定期检查WebSocket状态
-            setInterval(() => {
-                if (window.WebSocket && config.features.errorRestart.enabled) {
-                    // 这里只是记录日志，不做实际错误计数
-                    logger.debug('【错误重启】WebSocket监控活跃中');
-                }
-            }, 30000); // 每30秒检查一次
-        };
-
-        // 初始化WebSocket错误监控
-        setupWebSocketErrorMonitoring();
 
         // 开始监控 - 限制监控范围，只关注游戏相关的主要面板
         const gamePanelSelectors = [
