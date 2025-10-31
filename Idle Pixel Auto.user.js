@@ -3447,11 +3447,68 @@ websocket.send("FOUNDRY=dense_logs~100")
             const originalSend = ctor.prototype.send;
             if (typeof originalSend !== 'function') return;
 
+            // WebSocket readyState 常量
+            const WS_CONNECTING = 0;
+            const WS_OPEN = 1;
+            const WS_CLOSING = 2;
+            const WS_CLOSED = 3;
+            
+            const getReadyStateText = (state) => {
+                switch(state) {
+                    case WS_CONNECTING: return 'CONNECTING';
+                    case WS_OPEN: return 'OPEN';
+                    case WS_CLOSING: return 'CLOSING';
+                    case WS_CLOSED: return 'CLOSED';
+                    default: return `UNKNOWN(${state})`;
+                }
+            };
+
             const wrappedSend = function(...args) {
+                // 检查 WebSocket 状态
+                const currentState = this.readyState;
+                
+                // 如果状态不是 OPEN，记录详细信息
+                if (currentState !== WS_OPEN) {
+                    const stateText = getReadyStateText(currentState);
+                    const message = args[0];
+                    const messagePreview = typeof message === 'string' 
+                        ? (message.length > 50 ? message.substring(0, 50) + '...' : message)
+                        : (typeof message);
+                    
+                    logger.warn(
+                        `【错误重启】WebSocket状态异常 (${label}): 状态=${stateText}(${currentState}), ` +
+                        `尝试发送消息: ${messagePreview}`
+                    );
+                    
+                    // 如果是 CLOSING 或 CLOSED 状态，触发错误处理
+                    if (currentState === WS_CLOSING || currentState === WS_CLOSED) {
+                        if (config.features.errorRestart && config.features.errorRestart.enabled) {
+                            logger.error(
+                                `【错误重启】检测到WebSocket已关闭或正在关闭 (${label}), ` +
+                                `状态=${stateText}, 触发错误重启机制`
+                            );
+                            featureManager.handleWebSocketError();
+                        }
+                        // 不继续发送，避免浏览器控制台警告
+                        return;
+                    }
+                    
+                    // CONNECTING 状态，记录但继续尝试
+                    if (currentState === WS_CONNECTING) {
+                        logger.debug(`【错误重启】WebSocket正在连接中 (${label}), 尝试发送可能失败`);
+                    }
+                }
+                
+                // 尝试发送
                 try {
                     return originalSend.apply(this, args);
                 } catch (err) {
-                    logger.debug(`【错误重启】捕获WebSocket.send异常 (${label}):`, err);
+                    const stateText = getReadyStateText(this.readyState);
+                    logger.error(
+                        `【错误重启】WebSocket.send抛出异常 (${label}): ` +
+                        `状态=${stateText}(${this.readyState}), 错误:`, err
+                    );
+                    
                     if (config.features.errorRestart && config.features.errorRestart.enabled) {
                         featureManager.handleWebSocketError();
                     }
@@ -3462,7 +3519,7 @@ websocket.send("FOUNDRY=dense_logs~100")
             try {
                 ctor.prototype.send = wrappedSend;
                 ctor.prototype.__ipa_ws_send_wrapped = true;
-                logger.info(`【错误重启】已包装${label}.WebSocket.send`);
+                logger.info(`【错误重启】已包装${label}.WebSocket.send (增强状态检测)`);
             } catch (e) {
                 logger.warn(`【错误重启】包装${label}.WebSocket.send失败:`, e);
             }
