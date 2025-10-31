@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Idle Pixel Auto
 // @namespace    http://tampermonkey.net/
-// @version      2.7
+// @version      2.7.1
 // @description  自动进行Idle Pixel游戏中的各种操作
 // @author       Duckyの復活
 // @match        https://idle-pixel.com/login/play/
@@ -17,7 +17,13 @@
 
 /*
 更新日志：
-v2.7 (2025-01-XX) - WebSocket 早期守卫 & 调试工具
+v2.7.1 (2025-01-27) - 增强事件分析能力
+【调试工具增强】
+1. 新增：`IPA.analyzeEvents()` 命令，支持事件类型/URL分布分析
+2. 优化：`IPA.getEarlyGuard()` 输出事件统计而非完整队列，避免刷屏
+3. 完善：更新所有文档以反映新增的调试命令
+
+v2.7 (2025-01-27) - WebSocket 早期守卫 & 调试工具
 【核心能力】
 1. 新增：`@run-at document-start`，在页面任何脚本执行前注入
 2. 新增：`setupIdlePixelAutoEarlyWebSocketGuard` 早期守卫模块，劫持 WebSocket 构造函数与 send 方法
@@ -39,6 +45,7 @@ v2.7 (2025-01-XX) - WebSocket 早期守卫 & 调试工具
 【文档更新】
 13. README 新增调试工具说明
 14. WebSocket 测试方案文档补充 IPA 调试命令及实际测试记录
+15. 新增完整的《WebSocket监控解决方案总结.md》文档
 
 v2.6 (2025-10-24)
 1. 新增：独立 WebSocket 错误监控模块（WSMonitor），默认关闭且不干扰其他功能
@@ -436,7 +443,7 @@ const __idlePixelAutoTargetWindow = (typeof unsafeWindow !== 'undefined' && unsa
 (function() {
     'use strict';
 
-    const scriptVersion = '2.7';
+    const scriptVersion = '2.7.1';
     const featurePrefix = '【IdlePixelAuto】';
 
     // ================ 常量定义 ================
